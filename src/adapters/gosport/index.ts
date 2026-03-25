@@ -451,7 +451,7 @@ export class GosportAdapter implements CouncilAdapter {
   private mapWasteTypeToServiceType(wasteType: string): ServiceType {
     const normalized = wasteType.toLowerCase();
     
-    if (normalized.includes('refuse') || normalized.includes('general') || normalized.includes('rubbish') || normalized.includes('residual')) {
+    if (normalized.includes('refuse') || normalized.includes('general') || normalized.includes('rubbish') || normalized.includes('residual') || normalized === 'domestic') {
       return ServiceType.GENERAL_WASTE;
     }
     
