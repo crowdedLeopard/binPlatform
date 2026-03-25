@@ -329,6 +329,220 @@
 
 ---
 
+---
+
+## Phase 2 Decisions Captured
+
+### Adapter Implementation Decisions (Naomi)
+
+**D1: Eastleigh Response Format Discovery**
+- Endpoint returns JSON with variations in field names
+- Implementation: Permissive parser with multiple field name fallbacks
+- Rationale: Upstream may change field names without notice
+
+**D2: Rushmoor Browser Automation vs. XHR Discovery**
+- Decision: Playwright browser automation with network interception
+- Rationale: No obvious JSON endpoint visible; browser automation guarantees success
+- Future optimization: Monitor network logs for XHR patterns, replace with direct HTTP if found
+
+**D3: Evidence Storage — Blob Storage vs. Database**
+- Decision: Azure Blob Storage with reference IDs in database
+- Rationale: Responses can be large; blob storage cheaper for high-volume data; write-heavy workload
+- Implementation: `{councilId}/{date}/{uuid}.{ext}` paths with lifecycle policies
+
+**D4: Browser Adapter Base Pattern**
+- Reusable BrowserAdapter base class with security hardening built-in
+- Features: Domain allowlist, timeout enforcement, screenshot capture, HAR logging
+- Impact: 50% code reduction for future browser adapters (8+ councils)
+
+**D5: Kill Switch Implementation (Adapter Level)**
+- Environment variable-based with three levels: global, per-adapter, registry-level
+- Rationale: Meets SD-06 requirement (<60 seconds without deployment)
+- Implementation: Checked at startup and per-request
+
+**D6: Date Parsing — Multi-Format Support**
+- Support ISO 8601, UK format (DD/MM/YYYY), day names, generic Date.parse()
+- Rationale: Upstream formats vary by council
+- Output: Normalized to ISO 8601 only
+
+**D7: Adapter Metadata — AcquisitionMetadata Structure**
+- Capture: attemptId, timestamps, resource usage, execution context, caching, adapter info
+- Rationale: Enables detailed monitoring, debugging, and compliance audit
+- Impact: ~500 bytes overhead per request
+
+**D8: Service Type Mapping — Fuzzy Matching**
+- Fuzzy substring matching to canonical ServiceType enum
+- Examples: "Green bin" → GENERAL_WASTE, "Blue bin" → RECYCLING
+- Rationale: Normalizes across all councils for API consumers
+
+---
+
+### Routing and Resolution Architecture Decisions (Holden)
+
+**D1: Layered Property Resolution with Council Routing**
+- Flow: Validate postcode → normalize → sanitise house identifier → check Hampshire boundary → resolve council(s) → query adapters (in parallel if overlap) → deduplicate → cache
+- Hampshire overlaps: Hart/Rushmoor (GU11, GU12, GU14), Test-Valley/Eastleigh (SO51)
+- Rationale: Handles boundary overlaps, multiple address matches, property identity persistence
+
+**D2: Kill Switch Architecture (API Level)**
+- Database table: `council_adapters.kill_switch_active`
+- Checked before every adapter call in PropertyResolutionService
+- Admin API endpoints: `POST /v1/admin/adapters/:id/disable|enable`
+- Response time: <1 second to disable (database update + cache invalidate)
+
+**D3: Auth Middleware Strategy**
+- Role hierarchy: Public (IP rate-limited), Read (API key required), Admin (API key + admin role)
+- API key storage: Hashed with bcrypt, cached 5 minutes in Redis
+- Header support: `X-Api-Key` and `Authorization: Bearer`
+- Future: JWT for admin service, MFA enforcement
+
+**D4: Council Registry Seed Data**
+- Database migration: 002_council_seed.sql
+- 13 Hampshire councils with IDs, names, websites, adapter metadata
+- Risk levels: Eastleigh/Fareham (low, API-based), Winchester (high, browser automation)
+- Kill switches: All default to FALSE (enabled)
+
+---
+
+### Security Pattern Decisions (Amos)
+
+**D1: Output Sanitisation (CRITICAL)**
+- All adapter output fields MUST be HTML-escaped before returning
+- Prevents XSS if malicious upstream HTML/JavaScript returned in display fields
+- Enforcement: Phase 1 code review, Phase 2 automatic sanitisation layer (defence in depth)
+
+**D2: State Isolation (CRITICAL)**
+- Adapters MUST NOT store request-specific data in instance variables
+- All state must be passed explicitly through method parameters
+- Prevents data leakage between Request A and Request B
+- Enforcement: Platform creates fresh adapter instances per request
+
+**D3: Evidence Path Security (CRITICAL)**
+- BREAKING CHANGE: Remove `storagePath` from `SourceEvidence` interface
+- Platform MUST construct all evidence storage paths (not adapters)
+- Prevents path traversal vulnerability
+- Platform generates safe path: `evidence/{councilId}/{year}/{month}/{evidenceRef}.{type}`
+
+**D4: Input Validation Contract**
+- Platform MUST validate all inputs before calling adapter
+- Contract: Postcode (UK format, max 8 chars), UPRN (numeric, max 12 digits), Address fragment (max 100 chars)
+- Rationale: Prevents adapters from receiving malicious input
+- Implementation: Validation middleware before adapter calls
+
+**D5: Never Trust Upstream Content**
+- All council responses are hostile until proven otherwise
+- Required checks: Schema validation, malformed data rejection, parsing timeouts (30s), response size limits (10MB), HTML-escape before return
+- Rationale: Council websites could be compromised or serve hostile content
+
+**D6: No Secrets in Adapter Code**
+- Council credentials MUST come from Key Vault (never hardcode URLs, tokens, session IDs)
+- Enforcement: Pre-commit hooks + CI secret scanning
+- Rationale: Maintains SD-01 (No Secrets in Code, Config, or Git)
+
+**D7: Adapter Security Patterns — Code Review Checklist**
+- Mandatory security tests: SQL injection, XSS sanitization, bot detection handling, kill switch behavior, evidence storage validation, secret redaction
+- Integration tests: Concurrent requests (state leakage), malicious inputs, upstream anomalies
+- Violations block merge
+
+**D8: Enhanced Security Profile Interface**
+- Add runtime limits: maxExecutionTimeSeconds, maxMemoryMb, maxConcurrentExecutions
+- Add network requirements: allowedDomains, requiresTls
+- Add privacy flags: processesPii, piiTypes, retentionDays
+- Add monitoring: alertOnFailure, requiresManualReview
+- Rationale: Platform reads profile and enforces at runtime
+
+---
+
+### Test Pattern Decisions (Bobbie)
+
+**D1: Test-Before-Implementation for Phase 2**
+- Tests written from specifications (interface contracts, discovery notes, OpenAPI schema) before implementation
+- Benefits: Naomi and Holden work in parallel, tests validate contract not implementation, reduced rework
+- Owner: Bobbie
+
+**D2: 80% Coverage Minimum**
+- Global: 80% lines, functions, statements; 75% branches
+- Per-component: API routes 85%, core logic 90%, browser adapters 75%
+- Higher thresholds for critical paths, lower for hard-to-test areas
+- Owner: Bobbie
+
+**D3: Security Tests Non-Negotiable**
+- Security test suites cannot be skipped or disabled in CI
+- Enforce SD-01 through SD-12 controls
+- Violations block merge
+- Owner: Amos, Bobbie
+
+**D4: Mock-First, Real-Second**
+- Unit/security tests use mocks (no real network calls)
+- Integration tests can use real adapters (opt-in, not in CI)
+- CI must be fast and reliable
+- Real tests useful for smoke testing (not blocking merge)
+
+**D5: Security Test Requirements**
+- Input validation: SQL injection, XSS, path traversal, null bytes, Unicode normalization, excessive length, invalid format
+- Output sanitization: HTML tag stripping, script execution prevention, event handler removal, SQL escaping
+- Authentication: Missing key (401), invalid key (401), insufficient permissions (403), timing attack prevention, rate limiting, API key not echoed/logged
+
+---
+
+### Infrastructure Decisions (Drummer)
+
+**D1: Multi-Layer Container Scanning Strategy**
+- Trivy scans API and Worker images separately
+- CRITICAL severity: Exit code 1 (blocks build)
+- HIGH severity: Exit code 0 (warn, annotate PR, pass)
+- Upload SARIF for both images to GitHub Security tab
+- Cache Trivy DB between runs
+- Rationale: Blocking on CRITICAL prevents deploying vulnerable containers; HIGH allows team judgment
+
+**D2: Kill Switch Configuration as Code (Audit Job)**
+- CI job validates: Every council has `ADAPTER_KILL_SWITCH_{ID}`, defaults to false in .env.example, no hardcoded values
+- Builds FAIL if validation fails
+- Rationale: Prevents accidentally deploying without kill switch capability
+
+**D3: Branch Protection with 11 Required Status Checks**
+- Main branch requires 11 checks to pass before merge
+- Checks: lint-typecheck, unit-tests, integration-tests, security-tests, dependency-check, secrets-baseline, adapter-kill-switch-audit, build-and-scan-image, iac-scan, secret-scan, build
+- No bypasses (including administrators)
+- Automated setup script using GitHub CLI
+- Rationale: Enforces security baseline on every PR
+
+**D4: Network Policy Implementation — NSGs with Firewall Recommendation**
+- API Service: NO internet egress (Database, Redis, Key Vault, monitoring only)
+- Adapter Workers: Council URLs allowlist (13 domains), DB, Redis, Blob Storage only
+- Database/Redis: NO outbound access
+- Admin Service: VPN/Bastion inbound only, SSO outbound only
+- Cloud metadata (169.254.169.254): Explicitly blocked
+- LIMITATION: Azure NSGs support IP/port only, not domain-based filtering
+- RECOMMENDATION: Deploy Azure Firewall for Phase 2 production (~$900/month) for FQDN filtering
+
+**D5: Health Check Endpoints — Liveness vs. Readiness Separation**
+- Three endpoints: `/health` (liveness, always 200), `/health/live` (explicit liveness, Kubernetes convention), `/health/ready` (readiness, checks DB+Redis, 503 if unavailable)
+- Rationale: Orchestrator distinguishes "process crashed" from "dependencies unavailable"
+- Benefit: Liveness failures restart; readiness failures remove from load balancer (prevents cascade)
+
+**D6: Dockerfile Hardening**
+- Remove npm/yarn/apk from runtime images (attack surface reduction)
+- Add build args: BUILD_DATE, GIT_COMMIT
+- Label images with git commit SHA and build timestamp
+- Use wget for health checks (instead of node HTTP module)
+- Add security labels: security.no-new-privileges=true
+- Rationale: Immutable runtime images prevent tampering; git commit SHA enables tracing to source
+
+**D7: detect-secrets Integration for Baseline Secret Scanning**
+- Baseline file (.secrets.baseline) tracks known false positives
+- CI blocks on new secrets not in baseline
+- Workflow: `detect-secrets scan --baseline .secrets.baseline` to update
+- Rationale: Reduces false positive noise; blocks secrets before merge (not just historical scan)
+
+**D8: API Key Format — Platform-Specific**
+- Changed from `sk_live_`/`sk_test_` (Stripe-like) to `hbp_live_`/`hbp_test_` (platform-specific)
+- Reason: GitHub push protection blocked Stripe-like format
+- Applied across: auth.ts, audit.ts, .env.example
+- This is now the canonical key format for all API authentication
+
+---
+
 ## Governance
 
 - All meaningful changes require team consensus
@@ -338,3 +552,4 @@
 - **Architecture Decisions (Holden):** Require team acknowledgment before Phase 1
 - **Discovery Decisions (Naomi):** Require team discussion and input
 - **Infrastructure Decisions (Drummer):** Ready for Phase 1 implementation
+- **Test Decisions (Bobbie):** Non-negotiable for Phase 2 production readiness
