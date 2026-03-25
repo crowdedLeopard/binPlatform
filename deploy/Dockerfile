@@ -1,6 +1,6 @@
 # Multi-stage build for production-ready container
 # Stage 1: Builder
-FROM node:20-alpine AS builder
+FROM node:25-alpine AS builder
 
 WORKDIR /build
 
@@ -21,7 +21,7 @@ COPY src ./src
 RUN npm run build || [ -f dist/api/server.js ]
 
 # Stage 2: Runtime
-FROM node:20-alpine AS runtime
+FROM node:25-alpine AS runtime
 
 # Build arguments for labeling
 ARG BUILD_DATE
