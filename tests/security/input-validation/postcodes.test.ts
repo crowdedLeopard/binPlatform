@@ -385,14 +385,13 @@ describe('Security - Postcode Input Validation', () => {
 
     it('should not contain internal file paths in error responses', () => {
       const sanitizeErrorMessage = (message: string): string => {
-        // Remove Unix/Linux file paths
+        // First replace file paths (before removing "at" prefix)
         let sanitized = message.replace(/\/[\w\/.-]+\.(ts|js|json)/g, '[FILE]');
-        
-        // Remove Windows file paths
         sanitized = sanitized.replace(/[A-Z]:\\[\w\\.-]+\.(ts|js|json)/gi, '[FILE]');
         
-        // Remove stack trace line numbers
-        sanitized = sanitized.replace(/at .+:\d+:\d+/g, '');
+        // Then remove stack trace prefixes and line numbers
+        sanitized = sanitized.replace(/at\s+/g, '');
+        sanitized = sanitized.replace(/:\d+:\d+/g, '');
         
         return sanitized;
       };

@@ -55,3 +55,65 @@ Repo: crowdedLeopard/binPlatform. Owner: crowdedLeopard.
 **Commit**: 7c2bc91 "fix: resolve all TypeScript compilation errors"  
 **Status**: ✅ MERGED to master  
 **Build**: ✅ PASSING with zero TypeScript errors
+
+---
+
+### Session 2026-03-25: P1 Code Fixes (Octal Escape & Evidence Storage)
+**Fixed 2 critical issues identified by Bobbie's test report**
+
+#### Fix 1: Legacy Octal Escape Compile Error
+**Problem**: Legacy octal escape sequence `\01` in `postcodes.test.ts:490` causing strict mode compilation error  
+**Root Cause**: TypeScript ESM strict mode rejects octal escapes like `\01`, `\012`, etc.  
+**Solution**: Replaced `\01` with Unicode equivalent `\u0001` (null byte)  
+**Files Changed**: `tests/security/input-validation/postcodes.test.ts`
+
+#### Fix 2: Evidence Storage — Raw Bytes vs Parsed Object
+**Problem**: Evidence storage was storing parsed JavaScript objects instead of raw unmodified bytes/strings  
+**Security Impact**: Critical for audit, forensics, and schema drift detection  
+**Root Cause**: Adapters were parsing responses (`response.json()`, `JSON.parse()`) BEFORE storing evidence  
+**Solution**: Capture raw response text FIRST, then parse for application use  
+
+**Pattern Fixed**:
+```typescript
+// WRONG - stores parsed object
+const data = await response.json();
+const evidenceRef = uuidv4(); // never stored
+
+// CORRECT - stores raw string
+const rawResponseText = await response.text();
+const data = JSON.parse(rawResponseText);
+const evidenceResult = await storeEvidence(councilId, evidenceType, rawResponseText, metadata);
+```
+
+**Files Changed**:
+1. `src/adapters/eastleigh/index.ts`
+   - Added import for `storeEvidence()`
+   - Capture raw response text before parsing
+   - Properly call `storeEvidence()` with raw string
+   - Determine evidence type based on content-type (html vs json)
+   
+2. `src/adapters/fareham/index.ts`
+   - Added import for `storeEvidence()`
+   - Store raw SOAP/XML response before parsing
+   - Use 'html' evidence type for XML (text-based format)
+
+#### Key Learning: Evidence Storage Pattern
+**CRITICAL**: Always store raw bytes/string BEFORE any parsing, cheerio loading, or transformation  
+- ✅ `storeEvidence(councilId, 'html', rawHtmlString, metadata)`  
+- ✅ `storeEvidence(councilId, 'json', rawJsonString, metadata)`  
+- ❌ `storeEvidence(councilId, 'json', parsedObject, metadata)` — WRONG  
+- ❌ `storeEvidence(councilId, 'html', cheerio.load(html), metadata)` — WRONG
+
+#### Statistics
+- **Files changed**: 3
+- **Compile errors fixed**: 1 (octal escape)
+- **Security issues fixed**: 1 (evidence storage)
+- **Adapters fixed**: 2 (eastleigh, fareham)
+- **Build result**: ✅ CLEAN (zero TypeScript errors)
+- **Test result**: ✅ Postcode test passing (octal fix verified)
+
+#### Outcome
+**Commit**: 2a18d4d "fix: resolve octal escape compile error and fix evidence raw bytes storage"  
+**Status**: ✅ MERGED to master  
+**Build**: ✅ PASSING with zero TypeScript errors
+

@@ -98,8 +98,9 @@ describe('Security - Evidence Safety', () => {
       expect(stored.contentType).toBe('text/html');
       expect(stored.content.toString()).toBe(htmlWithScript);
       
-      // Evidence should be stored raw, not parsed
-      expect(typeof stored.content).not.toBe('object'); // Not a DOM object
+      // Evidence should be stored raw (as Buffer), not parsed into a DOM object
+      expect(stored.content).toBeInstanceOf(Buffer);
+      expect(stored.content.constructor.name).toBe('Buffer');
     });
 
     it('should store JSON evidence as raw bytes', () => {
@@ -390,7 +391,7 @@ describe('Security - Evidence Safety', () => {
           /sk_live_[A-Za-z0-9]{20,}/,
           /hbp_live_[A-Za-z0-9]{20,}/,
           /hbp_test_[A-Za-z0-9]{20,}/,
-          /api[_-]?key[=:\s]+[a-z0-9]{20,}/i,
+          /api[_-]?key[=:\s]+[A-Za-z0-9_\-]{16,}/i,
           /password[=:\s]+\S+/i,
           /bearer\s+[a-z0-9]{20,}/i,
           /secret[=:\s]+\S+/i,
