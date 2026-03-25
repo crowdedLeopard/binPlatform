@@ -116,6 +116,303 @@ export async function buildServer() {
     version: process.env.npm_package_version || '0.1.0'
   }));
 
+  // Root status page
+  server.get('/', async (request, reply) => {
+    const activeCouncils = councilRegistry.filter(c => {
+      const key = `ADAPTER_KILL_SWITCH_${c.council_id.toUpperCase().replace(/-/g, '_')}`;
+      return process.env[key] !== 'true';
+    });
+
+    const version = process.env.npm_package_version || '0.1.0';
+    const buildTime = new Date().toISOString();
+
+    // Build council rows
+    const councilRows = councilRegistry.map(c => {
+      const killSwitchKey = `ADAPTER_KILL_SWITCH_${c.council_id.toUpperCase().replace(/-/g, '_')}`;
+      const isKilled = process.env[killSwitchKey] === 'true';
+      const isActive = !isKilled;
+      const statusHtml = isActive ? '<span class="status-active"></span>Active' : '<span class="status-inactive"></span>Disabled';
+      return `
+          <tr>
+            <td><strong>${c.council_name}</strong><br><small style="color: #94a3b8;">${c.council_id}</small></td>
+            <td>${c.adapter_status || 'unknown'}</td>
+            <td>${Math.round((c.confidence_score || 0) * 100)}%</td>
+            <td>${statusHtml}</td>
+          </tr>`;
+    }).join('');
+
+    const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hampshire Bin Collection Data Platform</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      background: linear-gradient(135deg, #0f172a 0%, #1e3a5f 100%);
+      color: #e2e8f0;
+      line-height: 1.6;
+      min-height: 100vh;
+      padding: 2rem;
+    }
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+    header {
+      text-align: center;
+      margin-bottom: 3rem;
+      border-bottom: 2px solid #334155;
+      padding-bottom: 2rem;
+    }
+    h1 {
+      font-size: 2.5rem;
+      margin-bottom: 0.5rem;
+      color: #f1f5f9;
+    }
+    .subtitle {
+      font-size: 1.1rem;
+      color: #cbd5e1;
+    }
+    .status-badge {
+      display: inline-block;
+      padding: 0.5rem 1rem;
+      border-radius: 0.375rem;
+      font-weight: 600;
+      margin-top: 1rem;
+      background: #10b981;
+      color: #0f172a;
+    }
+    .section {
+      background: rgba(15, 23, 42, 0.5);
+      border: 1px solid #334155;
+      border-radius: 0.5rem;
+      padding: 1.5rem;
+      margin-bottom: 2rem;
+    }
+    .section h2 {
+      font-size: 1.5rem;
+      margin-bottom: 1rem;
+      color: #f1f5f9;
+      border-bottom: 1px solid #475569;
+      padding-bottom: 0.5rem;
+    }
+    .info-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 1rem;
+      margin-bottom: 1rem;
+    }
+    .info-item {
+      background: rgba(30, 41, 59, 0.8);
+      padding: 1rem;
+      border-radius: 0.375rem;
+      border-left: 3px solid #3b82f6;
+    }
+    .info-label {
+      font-size: 0.875rem;
+      color: #94a3b8;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .info-value {
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: #e2e8f0;
+      margin-top: 0.25rem;
+      font-family: 'Monaco', 'Menlo', monospace;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 1rem;
+    }
+    th {
+      background: rgba(30, 41, 59, 0.8);
+      padding: 0.75rem;
+      text-align: left;
+      font-weight: 600;
+      color: #cbd5e1;
+      border-bottom: 2px solid #334155;
+      font-size: 0.875rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    td {
+      padding: 0.75rem;
+      border-bottom: 1px solid #334155;
+    }
+    tbody tr:hover {
+      background: rgba(30, 41, 59, 0.6);
+    }
+    .status-active {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #10b981;
+      margin-right: 0.5rem;
+    }
+    .status-inactive {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #ef4444;
+      margin-right: 0.5rem;
+    }
+    .endpoints {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 1rem;
+    }
+    .endpoint {
+      background: rgba(30, 41, 59, 0.8);
+      padding: 1rem;
+      border-radius: 0.375rem;
+      border-left: 3px solid #06b6d4;
+    }
+    .endpoint-path {
+      font-family: 'Monaco', 'Menlo', monospace;
+      font-size: 0.9rem;
+      color: #06b6d4;
+      font-weight: 600;
+    }
+    .endpoint-desc {
+      font-size: 0.875rem;
+      color: #cbd5e1;
+      margin-top: 0.5rem;
+    }
+    a {
+      color: #06b6d4;
+      text-decoration: none;
+    }
+    a:hover {
+      text-decoration: underline;
+    }
+    code {
+      background: rgba(0,0,0,0.3);
+      padding: 0.5rem;
+      border-radius: 0.25rem;
+      display: block;
+      margin: 0.5rem 0;
+      font-family: 'Monaco', 'Menlo', monospace;
+    }
+    .footer {
+      text-align: center;
+      margin-top: 3rem;
+      padding-top: 2rem;
+      border-top: 1px solid #334155;
+      font-size: 0.875rem;
+      color: #64748b;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>🗑️ Hampshire Bin Collection Data Platform</h1>
+      <p class="subtitle">RESTful API for bin collection schedules across Hampshire</p>
+      <div class="status-badge">✓ Operational</div>
+    </header>
+
+    <div class="section">
+      <h2>Platform Status</h2>
+      <div class="info-grid">
+        <div class="info-item">
+          <div class="info-label">API Status</div>
+          <div class="info-value">🟢 Healthy</div>
+        </div>
+        <div class="info-item">
+          <div class="info-label">Version</div>
+          <div class="info-value">${version}</div>
+        </div>
+        <div class="info-item">
+          <div class="info-label">Councils Active</div>
+          <div class="info-value">${activeCouncils.length} / ${councilRegistry.length}</div>
+        </div>
+        <div class="info-item">
+          <div class="info-label">Last Updated</div>
+          <div class="info-value">${buildTime}</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>Hampshire Councils (${councilRegistry.length})</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Council</th>
+            <th>Adapter Status</th>
+            <th>Confidence</th>
+            <th>Active</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${councilRows}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="section">
+      <h2>API Endpoints</h2>
+      <div class="endpoints">
+        <div class="endpoint">
+          <div class="endpoint-path">GET /health</div>
+          <div class="endpoint-desc">Service health check</div>
+          <div style="margin-top: 0.75rem;"><a href="/health" target="_blank">Test Endpoint →</a></div>
+        </div>
+        <div class="endpoint">
+          <div class="endpoint-path">GET /ready</div>
+          <div class="endpoint-desc">Readiness probe with dependency checks</div>
+          <div style="margin-top: 0.75rem;"><a href="/ready" target="_blank">Test Endpoint →</a></div>
+        </div>
+        <div class="endpoint">
+          <div class="endpoint-path">GET /v1/councils</div>
+          <div class="endpoint-desc">List all councils with metadata</div>
+          <div style="margin-top: 0.75rem;"><a href="/v1/councils" target="_blank">Test Endpoint →</a></div>
+        </div>
+        <div class="endpoint">
+          <div class="endpoint-path">GET /v1/councils/:councilId</div>
+          <div class="endpoint-desc">Get details for a specific council</div>
+          <div style="margin-top: 0.75rem;"><a href="/v1/councils/basingstoke-deane" target="_blank">Example: basingstoke-deane →</a></div>
+        </div>
+        <div class="endpoint">
+          <div class="endpoint-path">GET /v1/councils/:councilId/health</div>
+          <div class="endpoint-desc">Get health status of a council adapter</div>
+          <div style="margin-top: 0.75rem;"><a href="/v1/councils/basingstoke-deane/health" target="_blank">Example: basingstoke-deane →</a></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>Getting Started</h2>
+      <div style="margin-top: 1rem;">
+        <p><strong>1. Check Platform Health</strong></p>
+        <code>curl http://localhost:3000/health</code>
+        
+        <p style="margin-top: 1.5rem;"><strong>2. Get All Councils</strong></p>
+        <code>curl http://localhost:3000/v1/councils</code>
+        
+        <p style="margin-top: 1.5rem;"><strong>3. Query a Council</strong></p>
+        <code>curl http://localhost:3000/v1/councils/basingstoke-deane</code>
+      </div>
+    </div>
+
+    <footer class="footer">
+      <p>Hampshire Bin Collection Data Platform v${version}</p>
+      <p style="margin-top: 0.5rem; color: #475569;">Live status page served at <code style="color: #64748b;">GET /</code></p>
+    </footer>
+  </div>
+</body>
+</html>`;
+
+    reply.type('text/html').send(html);
+  });
+
   // Ready check (includes dependency checks)
   server.get('/ready', async (request, reply) => {
     // TODO: Add database and Redis connection checks
