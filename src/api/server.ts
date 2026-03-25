@@ -2,6 +2,7 @@ import Fastify from 'fastify';
 import helmet from '@fastify/helmet';
 import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
+import IORedis from 'ioredis';
 import { logger } from '../observability/logger.js';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
@@ -92,9 +93,8 @@ export async function buildServer() {
     timeWindow: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '900000', 10), // 15 minutes
     cache: 10000,
     allowList: ['127.0.0.1'],
-    redis: process.env.REDIS_URL ? 
-      // Use Redis for distributed rate limiting in production
-      require('ioredis').default.createClient(process.env.REDIS_URL) : 
+    redis: process.env.REDIS_URL ?
+      new IORedis(process.env.REDIS_URL) :
       undefined,
     addHeaders: {
       'x-ratelimit-limit': true,
