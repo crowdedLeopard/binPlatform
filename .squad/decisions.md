@@ -2602,3 +2602,451 @@ Comprehensive SIEM integration using Azure Monitor Log Analytics with webhook fo
 2. **Phase 4B (Week 5-8):** Full launch with all 11 councils — 1.56M residents (84.6% Hampshire coverage)
 3. **Phase 4C (Month 3+):** Postponed council recovery via partnerships
 
+
+---
+
+## Azure Deployment Decisions
+
+### Drummer's Staging Deployment Pipeline
+
+# Azure Staging Deployment Pipeline — Decisions
+
+**Date:** 2026-03-25  
+**Author:** Drummer (DevOps Engineer)  
+**Status:** Implemented  
+**Context:** Full staging deployment pipeline for Azure Container Apps
+
+---
+
+## Decisions Made
+
+### 1. Single-Script Deployment Pattern
+
+**Decision:** Consolidated deployment into `deploy-staging.sh` single script (8 steps, sequential).
+
+**Rationale:**
+- **Simplicity:** One command to go from zero to deployed
+- **Atomic:** All-or-nothing deployment reduces partial failures
+- **Auditable:** Single execution log captures entire deployment
+- **Teachable:** New team members see full flow in one file
+
+**Alternative considered:** Multi-script orchestration (separate script per service)
+- **Rejected:** Harder to debug, more coordination overhead, error-prone ordering
+
+---
+
+### 2. Pre-Deployment Validation Script
+
+**Decision:** Created `pre-deploy-check.sh` to validate prerequisites before Terraform.
+
+**Rationale:**
+- **Fail-fast:** Catch missing tools/auth before expensive cloud operations
+- **Better UX:** Clear error messages ("install from https://...") vs cryptic Terraform errors
+- **CI/CD ready:** Can run as first step in GitHub Actions pipeline
+
+**Checks implemented:**
+- Azure CLI installed + authenticated
+- Terraform installed
+- Docker installed (for image builds)
+- Node.js installed (for migrations)
+- Subscription context display (prevents wrong-subscription deploys)
+
+---
+
+### 3. Terraform Backend State Management
+
+**Decision:** Used Azure Storage backend for Terraform state (`staging.terraform.tfstate`).
+
+**Rationale:**
+- **Team collaboration:** State stored centrally, not in local `.terraform/` folder
+- **Locking:** Azure Storage supports state locking (prevents concurrent applies)
+- **Disaster recovery:** State backed up by Azure Storage redundancy
+
+**Configuration:**
+```hcl
+backend "azurerm" {
+  resource_group_name  = "rg-binplatform-tfstate"
+  storage_account_name = "sabinplatformtfstate"
+  container_name       = "tfstate"
+  key                  = "staging.terraform.tfstate"
+}
+```
+
+**Alternative considered:** Local state with S3/GCS backend
+- **Rejected:** Azure-native solution preferred for Azure deployments
+
+---
+
+### 4. Kill Switch Implementation via Environment Variables
+
+**Decision:** Passed kill switches as environment variables (`ADAPTER_KILL_SWITCH_<NAME>=true`).
+
+**Rationale:**
+- **No code changes:** Kill switches configurable without redeploying code
+- **Terraform-managed:** Infrastructure team controls which adapters are enabled
+- **Auditability:** Terraform state shows kill switch configuration history
+- **Fast:** No database query needed to check kill switch state
+
+**Pattern:**
+```hcl
+# In Terraform
+adapter_kill_switches = {
+  basingstoke_deane = true
+  east_hampshire    = true
+  # ...
+}
+
+# Becomes env var in container:
+# ADAPTER_KILL_SWITCH_BASINGSTOKDEANE=true
+```
+
+**Alternative considered:** Kill switches in PostgreSQL `config` table
+- **Rejected:** Requires database query on every request (performance cost)
+
+---
+
+### 5. Container Registry Naming Convention
+
+**Decision:** ACR name format: `acrbinplatform<environment>` (e.g., `acrbinplatformstaging`).
+
+**Rationale:**
+- **Globally unique:** Azure Container Registry names must be globally unique
+- **Environment isolation:** Separate registry per environment (staging/production)
+- **Lowercase enforced:** ACR requires lowercase-only names
+- **No hyphens:** Removes hyphen to meet ACR naming rules
+
+**Alternative considered:** Shared ACR with environment tags
+- **Rejected:** Harder to enforce RBAC (staging team shouldn't access prod registry)
+
+---
+
+### 6. Managed Identity for ACR Pull
+
+**Decision:** Container Apps use User-Assigned Managed Identity (not admin credentials) to pull images.
+
+**Rationale:**
+- **No secrets in config:** No username/password stored in Terraform or Key Vault
+- **Azure AD authentication:** Native integration with ACR
+- **Least privilege:** Identity has only `AcrPull` role (cannot push or delete)
+- **Auditable:** Azure AD logs show which identity pulled which image
+
+**Pattern:**
+```hcl
+resource "azurerm_user_assigned_identity" "acr_pull" {
+  name = "id-binplatform-acrpull-staging"
+}
+
+resource "azurerm_role_assignment" "acr_pull" {
+  scope                = azurerm_container_registry.main.id
+  role_definition_name = "AcrPull"
+  principal_id         = azurerm_user_assigned_identity.acr_pull.principal_id
+}
+```
+
+**Alternative considered:** ACR admin credentials
+- **Rejected:** Admin credentials are static passwords (rotation burden, audit risk)
+
+---
+
+### 7. Database Password Generation
+
+**Decision:** Used `random_password` Terraform resource (32 chars, stored in Key Vault).
+
+**Rationale:**
+- **Secure by default:** 32-character random password with special chars
+- **Terraform-managed:** Password generated once, stored in state (encrypted at rest)
+- **Key Vault backup:** Password also stored in Key Vault for manual access
+- **Rotation-ready:** Can rotate by tainting `random_password` resource
+
+**Pattern:**
+```hcl
+resource "random_password" "postgres" {
+  length  = 32
+  special = true
+}
+
+resource "azurerm_key_vault_secret" "postgres_password" {
+  name         = "postgres-password"
+  value        = random_password.postgres.result
+  key_vault_id = azurerm_key_vault.main.id
+}
+```
+
+**Alternative considered:** Manual password entry via Terraform variable
+- **Rejected:** Human-chosen passwords are weaker; requires secure passing mechanism
+
+---
+
+### 8. Log Analytics Retention
+
+**Decision:** 30-day log retention for staging (90 days planned for production).
+
+**Rationale:**
+- **Cost optimization:** Staging doesn't need long retention (£0.10/GB/month)
+- **Regulatory compliance:** 90 days sufficient for most UK data retention policies
+- **Debug window:** 30 days enough to investigate staging incidents
+
+**Cost analysis:**
+- Staging (30 days): ~5GB/month × £0.10 = £0.50/month
+- Production (90 days): ~50GB/month × £0.10 = £5.00/month
+
+**Alternative considered:** 7-day retention
+- **Rejected:** Too short for debugging complex issues (some appear only after week)
+
+---
+
+### 9. PostgreSQL SKU for Staging
+
+**Decision:** `B_Standard_B1ms` (Burstable tier, 1 vCore, 2GB RAM).
+
+**Rationale:**
+- **Cost:** £12/month vs £150/month for General Purpose tier
+- **Performance:** Burstable sufficient for beta (3 councils, low traffic)
+- **Credits:** B1ms has 40 CPU credits/hour (enough for bursty beta traffic)
+- **Upgrade path:** Can scale to GP tier via Terraform variable change
+
+**Limitations:**
+- No read replicas (not needed for beta)
+- No zone redundancy (acceptable for staging)
+- CPU throttling if credits exhausted (monitoring alert needed)
+
+**Alternative considered:** General Purpose tier
+- **Rejected:** 12x cost increase not justified for staging workload
+
+---
+
+### 10. Redis SKU for Staging
+
+**Decision:** Basic C0 (250MB cache, single node).
+
+**Rationale:**
+- **Cost:** £12/month vs £70/month for Standard C1
+- **Capacity:** 250MB sufficient for 3-council beta cache
+- **No HA:** Single node acceptable for staging (cache miss = slower, not fatal)
+
+**Limitations:**
+- No persistence (cache lost on restart)
+- No replication (no failover)
+- 256MB max memory
+
+**Alternative considered:** Standard C1 (with HA)
+- **Rejected:** HA not required for staging; cache miss is non-fatal
+
+---
+
+## Post-Deployment Verification
+
+Script includes 7 verification steps:
+
+1. **Health endpoint:** `GET /health/ready` returns 200
+2. **Councils API:** `GET /v1/councils` returns 200
+3. **Database connectivity:** Migrations succeed
+4. **Container logs:** No startup errors in Azure Monitor
+5. **Kill switch validation:** Only 3 councils appear in `/v1/councils` response
+6. **Image tag:** Deployed image matches git commit SHA
+7. **Environment variables:** Key Vault references resolved correctly
+
+---
+
+## Rollback Plan
+
+If staging deployment fails:
+
+1. **Terraform destroy:** `terraform destroy` removes all Azure resources
+2. **Local development:** Revert to Docker Compose for testing
+3. **Investigate logs:** Check Terraform output + Azure Monitor logs
+4. **Fix + redeploy:** Update Terraform/scripts and re-run `deploy-staging.sh`
+
+**No data loss:** Staging has no production data; safe to destroy/recreate.
+
+---
+
+## Next Steps
+
+1. **User validation:** crowdedLeopard runs `az login` + `deploy-staging.sh`
+2. **Smoke tests:** Verify 3 councils return collection schedules
+3. **Beta testing:** Share API URL with Hampshire council partners
+4. **Production prep:** Replicate to `environments/production/` with higher SKUs
+5. **CI/CD pipeline:** Convert `deploy-staging.sh` to GitHub Actions workflow
+
+---
+
+## References
+
+- ADR-008: Production Deployment Strategy (Azure Container Apps decision)
+- `docs/production-readiness.md`: Kill switch strategy, beta scope
+- `infra/terraform/`: Modular Terraform structure
+- `deploy/Dockerfile`: Multi-stage build pattern
+
+
+---
+
+### Holden's Production Promotion Strategy
+
+# Decision: Azure Production Promotion Strategy
+
+**Date:** 2026-03-25  
+**Agent:** Holden (Lead Architect)  
+**Status:** PROPOSED  
+**Requested By:** crowdedLeopard
+
+---
+
+## Context
+
+The Hampshire Bin Platform is moving from development to production. With 11 of 13 councils implemented (84.6% population coverage), the team needs a structured approach to:
+
+1. Validate staging readiness before promoting to production
+2. Execute a safe, reversible promotion process
+3. Define success metrics for the beta period
+
+This decision complements ADR-008 (Production Deployment Strategy) by operationalizing the staging → production transition.
+
+---
+
+## Decision
+
+### 1. Beta Success Criteria
+
+**7-Day Minimum Beta Period** with quantitative and qualitative gates:
+
+**Quantitative Thresholds:**
+- API uptime > 99.5% (Azure Monitor)
+- Zero P0/P1 incidents
+- All 3 beta adapters (Eastleigh, Fareham, Rushmoor) returning confidence > 0.75
+- p95 latency: < 200ms (cached), < 2s (live)
+- Synthetic checks: 100% green for 7 consecutive days
+- Drift alerts: 0 breaking, < 3 minor
+
+**Qualitative Checks:**
+- Manual end-to-end postcode lookup tested for each beta council
+- Admin dashboard reviewed by human operator
+- At least one IR drill completed on staging
+- Backup/restore verified
+- SIEM forwarding confirmed
+
+**Rationale:** 7 days provides sufficient signal for weekly patterns (Monday AM peaks), while qualitative checks ensure human validation of automated metrics.
+
+---
+
+### 2. Production Promotion Process
+
+**Phased Rollout:**
+- **Week 1 (Beta):** Eastleigh, Fareham, Rushmoor (highest confidence: 0.95, 0.90, 0.78)
+- **Week 2:** Add East Hampshire, Gosport, Havant
+- **Week 3:** Add Hart, Winchester, Test Valley, Portsmouth, Basingstoke
+- **TBD:** New Forest, Southampton (postponed — bot protection)
+
+**Promotion Mechanics:**
+1. **Image promotion:** Retag staging image for production (no rebuild — same bits)
+2. **Infrastructure:** Terraform apply for production environment
+3. **Database:** Run migrations on production DB
+4. **Adapter enablement:** Incremental kill switch disablement (per week)
+5. **Post-deploy verification:** Automated smoke tests (verify-deployment.sh)
+
+**Rollback Plan:**
+```bash
+# Scale Container App to 0 if production unhealthy within 1 hour
+az containerapp update \
+  --name ca-binplatform-api-production \
+  --resource-group rg-binplatform-production \
+  --min-replicas 0 --max-replicas 0
+# Staging remains live — no user impact
+```
+
+**Rationale:** Phased rollout limits blast radius. Using staging image (not rebuilding) ensures identical behavior. Kill switches enable per-council rollback without full environment teardown.
+
+---
+
+### 3. Post-Deployment Verification
+
+**Automated Smoke Test Script:** `scripts/deploy/verify-deployment.sh`
+
+**Checks:**
+- Health probes (liveness, readiness, metrics)
+- Public API endpoints (councils list, individual councils)
+- Auth enforcement (401 on admin without key, 404 on unknown routes)
+- Adapter health (Eastleigh, Fareham, Rushmoor)
+- Admin dashboard accessibility
+
+**Pass Criteria:** All checks return expected HTTP status codes.
+
+**Execution:** Run after every deployment (staging, production, rollback).
+
+**Rationale:** Codifies "is production healthy?" as executable script. Reduces human error in post-deploy validation.
+
+---
+
+## Implications
+
+### Positive
+1. **Risk mitigation:** Phased rollout limits impact of production issues
+2. **Repeatability:** Codified runbook ensures consistent promotions
+3. **Observability:** Quantitative metrics provide objective go/no-go signal
+4. **Reversibility:** Rollback plan tested in staging before production
+
+### Neutral
+1. **7-day delay:** Minimum beta period adds 1 week to production timeline
+2. **Manual qualitative checks:** Requires human operator review (cannot fully automate)
+
+### Negative
+1. **Partial automation:** Promotion still requires manual Terraform/Azure CLI steps
+2. **No canary traffic:** All-or-nothing promotion (no gradual traffic shift)
+3. **Single rollback mechanism:** Scaling to 0 is only safety valve (no instant revision switch)
+
+---
+
+## Alternatives Considered
+
+### 1. Big-Bang Deployment (All 11 Councils at Once)
+**Rejected:** Too risky. If production has issues, impact is 84.6% of Hampshire population.
+
+### 2. 24-Hour Beta Period
+**Rejected:** Insufficient for weekly traffic patterns (Monday AM peak). 7 days captures full weekly cycle.
+
+### 3. Gradual Traffic Shift (Canary)
+**Deferred:** Azure Container Apps supports traffic splitting, but staging/production are separate environments. Would require shared production environment with revision splitting (future enhancement).
+
+---
+
+## Validation
+
+**Pre-Promotion:**
+- [ ] All beta success criteria met (see `docs/runbooks/beta-success-criteria.md`)
+- [ ] `verify-deployment.sh` passes on staging
+- [ ] Terraform plan reviewed (production.tfplan)
+- [ ] Security scan clean (npm audit, trivy)
+- [ ] Audit logs reviewed (last 7 days)
+
+**Post-Promotion:**
+- [ ] `verify-deployment.sh` passes on production
+- [ ] Azure Monitor dashboards green
+- [ ] First production API call successful (manual test)
+- [ ] Audit log shows promotion event
+
+---
+
+## References
+
+- **ADR-008:** Production Deployment Strategy (`docs/adr/ADR-008-production-deployment.md`)
+- **Production Readiness:** `docs/production-readiness.md`
+- **Platform Status:** `docs/platform-status.md`
+- **Runbook:** `docs/runbooks/production-promotion.md`
+- **Beta Criteria:** `docs/runbooks/beta-success-criteria.md`
+- **Verification Script:** `scripts/deploy/verify-deployment.sh`
+
+---
+
+## Next Steps
+
+1. **Drummer (DevOps Lead):** Review Terraform production plan
+2. **Amos (Security Engineer):** Final security sign-off on production config
+3. **Naomi (Adapter Engineer):** Confirm beta adapter confidence scores stable
+4. **Team:** Schedule promotion window (recommend weekday AM, avoid Mondays)
+
+---
+
+**Decision Owner:** Holden  
+**Approval Required From:** Drummer (DevOps), Amos (Security)  
+**Review Date:** After first production promotion (retrospective)
+
