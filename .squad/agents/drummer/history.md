@@ -472,3 +472,82 @@
 - Terraform environments ready for production deployment (full IaC, no manual steps)
 - CI/CD gates enforce security posture (license check, SBOM, scorecard, container signing)
 
+
+
+### 2026-03-25 - Database and Redis Wiring to Container App
+
+**Context:**
+Container App was deployed but DATABASE_URL and REDIS_URL environment variables were not configured, preventing the API from connecting to PostgreSQL and Redis.
+
+**Actions Completed:**
+1. Retrieved secrets from Key Vault (kv-binplatform-stg):
+   - database-url: Already existed with correct connection string
+   - redis-url: Already existed with correct connection string
+   - database-password: Retrieved for migration execution
+
+2. Created PostgreSQL database:
+   - Database name: binplatform
+   - Server: psql-binplatform-staging
+   - Used UTF8 charset and en_US.utf8 collation
+
+3. Configured environment variables on Container App:
+   - Set DATABASE_URL and REDIS_URL as literal env vars using `az containerapp update`
+   - New revision (0000005) deployed automatically
+   - Traffic routed 100% to new revision
+
+4. Executed database migration:
+   - Temporarily enabled public network access (Disabled → Enabled)
+   - Created firewall rule for deployment IP (145.40.145.168)
+   - Enabled PostgreSQL extensions: UUID-OSSP, PGCRYPTO
+   - Migration file: src/storage/postgres/migrations/001_initial_schema.sql
+   - **Issue encountered:** Migration script had dependency issue with partitioned table triggers
+     - Root cause: DO block tried to drop triggers on partition tables, but partition triggers depend on parent table triggers
+     - Solution: Patched migration to skip partition tables when creating triggers (only process non-partition tables)
+   - Migration successful: 94 tables created (including partition tables for collection_events, acquisition_attempts, security_events, audit_entries)
+   - Re-disabled public network access (Enabled → Disabled) for security
+   - Removed temporary firewall rule
+
+5. Verification:
+   - Health endpoint: HTTP 200 ✓
+   - /v1/councils endpoint: HTTP 200, returns 13 councils ✓
+   - Database connection confirmed working
+
+**Migration Patch Details:**
+The migration script uses partitioned tables which automatically create child partitions. The final DO block attempts to create triggers on all tables with `updated_at` column, including both parent and partition tables. PostgreSQL prevents dropping partition triggers independently because they're dependencies of parent table triggers.
+
+Workaround: Modified the table discovery query to exclude partition tables:
+`sql
+-- Changed FROM information_schema query TO:
+SELECT t.relname as table_name
+FROM pg_class t
+JOIN pg_namespace n ON t.relnamespace = n.oid
+JOIN pg_attribute a ON a.attrelid = t.oid
+WHERE a.attname = 'updated_at'
+AND n.nspname = 'public'
+AND t.relkind = 'r'
+AND NOT t.relispartition  -- Key addition
+`
+
+**Observations:**
+- Container App logs show runtime error: "ReferenceError: require is not defined" in server.js
+- This is an application code issue (ES modules vs CommonJS), not infrastructure
+- Health endpoint works despite error, suggesting partial functionality
+- This error is outside the scope of database wiring task
+
+**Infrastructure State:**
+- Resource Group: rg-binplatform-staging
+- PostgreSQL: psql-binplatform-staging (public access disabled, extensions enabled)
+- Redis: redis-binplatform-staging  
+- Container App: ca-binplatform-api-staging (revision 0000005, env vars configured)
+- Key Vault: kv-binplatform-stg (contains all required secrets)
+
+**Security Hardening Applied:**
+- PostgreSQL public access disabled after migration
+- Temporary firewall rules removed
+- Secrets stored in Key Vault, not in code
+- Environment variables set directly (not using secret refs for demonstrator simplicity)
+
+**Next Steps for Other Agents:**
+- Application code needs fix for "require is not defined" error (likely ES module configuration issue)
+- Consider seeding council data if /v1/councils returns empty names
+- Consider switching to secret references for DATABASE_URL/REDIS_URL in production

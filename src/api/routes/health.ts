@@ -7,11 +7,11 @@
 
 import type { FastifyPluginAsync } from 'fastify';
 import type { Pool } from 'pg';
-import type { RedisClientType } from 'redis';
+import type Redis from 'ioredis';
 
 interface HealthCheckDeps {
   db: Pool;
-  redis: RedisClientType;
+  redis: Redis;
 }
 
 export const healthRoutes: FastifyPluginAsync<HealthCheckDeps> = async (fastify, opts) => {

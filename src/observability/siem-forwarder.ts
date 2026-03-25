@@ -162,7 +162,7 @@ export class SiemForwarder {
    */
   private async forwardImmediate(events: AuditEvent[]): Promise<void> {
     if (!this.config.azureLogAnalyticsWorkspaceId || !this.config.azureLogAnalyticsSharedKey) {
-      logger.debug('SIEM not configured, skipping forward', { eventCount: events.length });
+      logger.debug({ eventCount: events.length }, 'SIEM not configured, skipping forward');
       return;
     }
 
@@ -170,13 +170,13 @@ export class SiemForwarder {
 
     try {
       await this.sendToAzureLogAnalytics(events);
-      logger.debug('Forwarded events to SIEM', { eventCount: events.length });
+      logger.debug({ eventCount: events.length }, 'Forwarded events to SIEM');
     } catch (error) {
-      logger.error('Failed to forward events to SIEM', {
+      logger.error({
         error,
         eventCount: events.length,
         eventIds: events.map(e => e.eventId),
-      });
+      }, 'Failed to forward events to SIEM');
 
       // Retry logic
       await this.retryForward(events, 1);
@@ -190,10 +190,10 @@ export class SiemForwarder {
    */
   private async retryForward(events: AuditEvent[], attempt: number): Promise<void> {
     if (attempt > this.config.maxRetries) {
-      logger.error('SIEM forward retry exhausted', {
+      logger.error({
         eventCount: events.length,
         attempts: attempt,
-      });
+      }, 'SIEM forward retry exhausted');
       return;
     }
 
@@ -202,9 +202,9 @@ export class SiemForwarder {
 
     try {
       await this.sendToAzureLogAnalytics(events);
-      logger.info('SIEM forward retry succeeded', { attempt, eventCount: events.length });
+      logger.info({ attempt, eventCount: events.length }, 'SIEM forward retry succeeded');
     } catch (error) {
-      logger.warn('SIEM forward retry failed', { attempt, error });
+      logger.warn({ attempt, error }, 'SIEM forward retry failed');
       await this.retryForward(events, attempt + 1);
     }
   }
@@ -312,12 +312,12 @@ export class SiemForwarder {
         throw new Error(`Webhook error: ${response.status}`);
       }
 
-      logger.debug('Security alert sent to webhook', {
+      logger.debug({
         eventType: event.eventType,
         webhookType,
-      });
+      }, 'Security alert sent to webhook');
     } catch (error) {
-      logger.error('Failed to send webhook alert', { error, eventId: event.eventId });
+      logger.error({ error, eventId: event.eventId }, 'Failed to send webhook alert');
     }
   }
 
@@ -453,9 +453,9 @@ export const siemForwarder = new SiemForwarder();
  * Call this during application startup.
  */
 export function initializeSiemForwarding(): void {
-  logger.info('SIEM forwarder initialized', {
+  logger.info({
     enabled: siemForwarder['config'].enabled,
     hasWorkspaceId: !!siemForwarder['config'].azureLogAnalyticsWorkspaceId,
     hasWebhook: !!siemForwarder['config'].webhookUrl,
-  });
+  }, 'SIEM forwarder initialized');
 }

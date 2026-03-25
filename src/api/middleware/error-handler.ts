@@ -186,7 +186,7 @@ export function errorHandler() {
           requestId,
         });
         
-        return c.json(error.toResponse(), error.statusCode);
+        return c.json(error.toResponse(), error.statusCode as any);
       }
       
       // Auth errors - return minimal details

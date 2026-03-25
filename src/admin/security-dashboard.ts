@@ -398,11 +398,11 @@ export class SecurityDashboard {
       throw new Error(`Incident ${id} not found or already acknowledged`);
     }
 
-    logger.info('Incident acknowledged', {
+    logger.info({
       incidentId: id,
       acknowledgedBy: by.id,
       notes,
-    });
+    }, 'Incident acknowledged');
   }
 
   /**

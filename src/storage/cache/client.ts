@@ -41,19 +41,19 @@ const MAX_KEY_LENGTH = 200; // Prevent excessively long keys
 function validateCacheKey(key: string): boolean {
   // Check length
   if (key.length > MAX_KEY_LENGTH) {
-    logger.warn('Cache key exceeds maximum length', { key, maxLength: MAX_KEY_LENGTH });
+    logger.warn({ key, maxLength: MAX_KEY_LENGTH }, 'Cache key exceeds maximum length');
     return false;
   }
   
   // Only allow alphanumeric, hyphens, underscores, colons
   if (!/^[a-zA-Z0-9\-_:]+$/.test(key)) {
-    logger.warn('Cache key contains invalid characters', { key });
+    logger.warn({ key }, 'Cache key contains invalid characters');
     return false;
   }
   
   // Reject path traversal attempts
   if (key.includes('..')) {
-    logger.warn('Cache key contains path traversal attempt', { key });
+    logger.warn({ key }, 'Cache key contains path traversal attempt');
     return false;
   }
   
@@ -68,10 +68,10 @@ function validateValueSize(serialized: string): boolean {
   const size = Buffer.byteLength(serialized, 'utf8');
   
   if (size > MAX_CACHED_VALUE_SIZE_BYTES) {
-    logger.warn('Cached value exceeds maximum size', {
+    logger.warn({
       size,
       maxSize: MAX_CACHED_VALUE_SIZE_BYTES,
-    });
+    }, 'Cached value exceeds maximum size');
     return false;
   }
   
@@ -156,11 +156,11 @@ export function initCache(config: CacheConfig): void {
   });
 
   redis.on('connect', () => {
-    logger.info('Redis connected');
+    logger.info({}, 'Redis connected');
   });
 
   redis.on('ready', () => {
-    logger.info('Redis ready');
+    logger.info({}, 'Redis ready');
   });
 }
 
@@ -187,7 +187,7 @@ export async function closeCache(): Promise<void> {
   if (redis) {
     await redis.quit();
     redis = null;
-    logger.info('Cache connection closed');
+    logger.info({}, 'Cache connection closed');
   }
 }
 
@@ -216,7 +216,7 @@ export async function get<T>(
     
     // Run custom validation if provided
     if (validate && !validate(parsed)) {
-      logger.warn('Cached value failed validation', { key });
+      logger.warn({ key }, 'Cached value failed validation');
       // Delete poisoned value
       await del(key);
       return null;
@@ -262,7 +262,7 @@ export async function set<T>(
       await getCache().set(key, serialized);
     }
     
-    logger.debug('Cached value set', { key, ttl: ttlSeconds, size: serialized.length });
+    logger.debug({ key, ttl: ttlSeconds, size: serialized.length }, 'Cached value set');
   } catch (error) {
     logger.error({ error, key }, 'Failed to set cached value');
     throw error;
@@ -294,7 +294,7 @@ export async function invalidatePattern(pattern: string): Promise<number> {
   try {
     const keys = await getCache().keys(pattern);
     if (keys.length > 0) {
-      logger.info('Invalidating cache keys by pattern', { pattern, count: keys.length });
+      logger.info({ pattern, count: keys.length }, 'Invalidating cache keys by pattern');
       return await getCache().del(...keys);
     }
     return 0;

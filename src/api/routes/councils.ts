@@ -9,6 +9,7 @@
 
 import { Hono } from 'hono';
 import type { CouncilAdapter } from '../../adapters/base/adapter.interface';
+import { HealthStatus } from '../../adapters/base/adapter.interface';
 import { councilNotFound, adapterUnavailable, internalError } from '../errors';
 import { getAuthContext } from '../middleware/auth';
 
@@ -36,7 +37,7 @@ export function createCouncilRoutes(adapters: Map<string, CouncilAdapter>) {
         // Determine adapter status from capabilities
         const adapterStatus = capabilities.isProductionReady 
           ? 'implemented' 
-          : health.status === 'unavailable' 
+          : health.status === HealthStatus.DEGRADED 
             ? 'postponed' 
             : 'stub';
         
@@ -94,7 +95,7 @@ export function createCouncilRoutes(adapters: Map<string, CouncilAdapter>) {
       // Determine adapter status
       const adapterStatus = capabilities.isProductionReady 
         ? 'implemented' 
-        : health.status === 'unavailable' 
+        : health.status === HealthStatus.DEGRADED 
           ? 'postponed' 
           : 'stub';
 

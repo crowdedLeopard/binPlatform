@@ -79,10 +79,10 @@ export class SecurityWebhookForwarder {
 
     // Check severity threshold
     if (!shouldForwardBySeverity(alert.severity, this.config.minSeverity)) {
-      logger.debug('Alert below minimum severity threshold', {
+      logger.debug({
         alertSeverity: alert.severity,
         minSeverity: this.config.minSeverity,
-      });
+      }, 'Alert below minimum severity threshold');
       return;
     }
 
@@ -101,17 +101,17 @@ export class SecurityWebhookForwarder {
         throw new Error(`Webhook returned ${response.status}: ${await response.text()}`);
       }
 
-      logger.info('Security alert forwarded to webhook', {
+      logger.info({
         severity: alert.severity,
         eventType: alert.eventType,
         webhookType: this.config.webhookType,
-      });
+      }, 'Security alert forwarded to webhook');
     } catch (error) {
-      logger.error('Failed to forward security alert to webhook', {
+      logger.error({
         error,
         eventType: alert.eventType,
         webhookType: this.config.webhookType,
-      });
+      }, 'Failed to forward security alert to webhook');
     }
   }
 

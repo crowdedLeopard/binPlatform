@@ -130,6 +130,7 @@ export interface SafeDetails {
   threshold?: number;
   count?: number;
   pattern?: string;
+  tier?: string;
 }
 
 export interface SafeContext {
@@ -245,7 +246,7 @@ class AuditLogger {
     
     // Ship to SIEM (async, non-blocking)
     this.shipToSiem(fullEvent).catch(err => {
-      logger.debug('SIEM shipping failed', { error: err });
+      logger.debug({ error: err }, 'SIEM shipping failed');
     });
   }
   
@@ -351,7 +352,7 @@ class AuditLogger {
       },
       action: `abuse.${type}`,
       outcome: 'blocked',
-      metadata: details,
+      metadata: details as Record<string, unknown>,
     });
   }
   
@@ -480,7 +481,7 @@ class AuditLogger {
       await siemForwarder.forward(event);
     } catch (error) {
       // Log error but never throw - audit logging is best effort
-      logger.debug('SIEM forwarding not available or failed', { error });
+      logger.debug({ error }, 'SIEM forwarding not available or failed');
     }
   }
 }

@@ -74,7 +74,8 @@ export class NewForestAdapter implements CouncilAdapter {
 
   async verifyHealth(): Promise<AdapterHealth> {
     return {
-      status: HealthStatus.UNAVAILABLE,
+      councilId: this.councilId,
+      status: HealthStatus.DEGRADED,
       checkedAt: new Date().toISOString(),
       upstreamReachable: false,
       lastSuccessAt: null,
@@ -90,27 +91,39 @@ export class NewForestAdapter implements CouncilAdapter {
 
   async securityProfile(): Promise<AdapterSecurityProfile> {
     return {
+      councilId: this.councilId,
       riskLevel: ExecutionRiskLevel.CRITICAL,
       requiresBrowserAutomation: true,
+      executesJavaScript: true,
       externalDomains: ['www.newforest.gov.uk'],
-      lastSecurityReview: '2026-03-25',
-      knownVulnerabilities: [],
-      mitigations: [
+      handlesCredentials: false,
+      securityConcerns: [
         'Adapter disabled — upstream blocks automated access',
         'Manual review required to determine if access is possible',
       ],
+      lastSecurityReview: '2026-03-25',
+      isSandboxed: true,
+      networkIsolation: 'allowlist_only',
+      requiredPermissions: ['network.http', 'browser.automation'],
     };
   }
 
   private unavailableResponse(correlationId: string): any {
     const metadata: AcquisitionMetadata = {
-      acquiredAt: new Date().toISOString(),
-      acquisitionDurationMs: 0,
-      retryCount: 0,
-      correlationId,
-      upstreamRequestId: null,
+      attemptId: `new-forest-unavailable-${Date.now()}`,
+      adapterId: this.councilId,
+      councilId: this.councilId,
+      lookupMethod: LookupMethod.UNSUPPORTED,
+      startedAt: new Date().toISOString(),
+      completedAt: new Date().toISOString(),
+      durationMs: 0,
+      httpRequestCount: 0,
+      bytesReceived: 0,
+      usedBrowserAutomation: false,
+      adapterVersion: '0.1.0',
+      executionEnvironment: 'disabled',
+      riskLevel: ExecutionRiskLevel.CRITICAL,
       cacheHit: false,
-      evidenceCaptured: false,
     };
 
     return {

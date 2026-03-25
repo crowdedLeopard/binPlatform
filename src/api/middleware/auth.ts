@@ -7,7 +7,7 @@
  */
 
 import type { Context, Next } from 'hono';
-import { ApiError, unauthorized, invalidApiKey, forbidden } from '../errors';
+import { ApiError, ErrorCode, unauthorized, invalidApiKey, forbidden } from '../errors';
 import { randomUUID } from 'node:crypto';
 
 export type UserRole = 'public' | 'read' | 'admin';
@@ -200,7 +200,7 @@ export class AuthMiddleware {
 export function getAuthContext(c: Context): AuthContext {
   const auth = c.get('auth');
   if (!auth) {
-    throw new ApiError('INTERNAL_ERROR', 'Auth context not set', 500);
+    throw new ApiError(ErrorCode.INTERNAL_ERROR, 'Auth context not set', 500);
   }
   return auth as AuthContext;
 }

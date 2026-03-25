@@ -208,7 +208,7 @@ export class SyntheticMonitorWorker {
       
       const probeResult: LivenessProbeResult = {
         adapterId,
-        status: health.status,
+        status: health.status as 'healthy' | 'degraded' | 'unhealthy',
         duration,
         upstreamReachable: health.upstreamReachable,
         timestamp: new Date().toISOString(),

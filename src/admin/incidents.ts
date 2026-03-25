@@ -158,12 +158,12 @@ export class IncidentManager {
       },
     });
 
-    logger.info('Incident created', {
+    logger.info({
       incidentId: id,
       type: input.type,
       severity: input.severity,
       councilId: input.councilId,
-    });
+    }, 'Incident created');
 
     return incident;
   }
@@ -247,11 +247,11 @@ export class IncidentManager {
       },
     });
 
-    logger.info('Incident acknowledged', {
+    logger.info({
       incidentId,
       acknowledgedBy: actor.id,
       notes,
-    });
+    }, 'Incident acknowledged');
 
     return incident;
   }
@@ -341,11 +341,11 @@ export class IncidentManager {
       },
     });
 
-    logger.info('Incident resolved', {
+    logger.info({
       incidentId,
       resolvedBy: actor.id,
       resolutionNotes,
-    });
+    }, 'Incident resolved');
 
     return incident;
   }

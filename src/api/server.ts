@@ -68,18 +68,6 @@ export async function buildServer() {
     permittedCrossDomainPolicies: { permittedPolicies: 'none' },
     referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
     xssFilter: false,  // Deprecated header - disabled
-    permissionsPolicy: {
-      features: {
-        geolocation: [],
-        microphone: [],
-        camera: [],
-        payment: [],
-        usb: [],
-        accelerometer: [],
-        gyroscope: [],
-        magnetometer: [],
-      }
-    }
   });
 
   // Remove server identification headers
@@ -198,7 +186,12 @@ export async function buildServer() {
     // Don't leak stack traces in production
     const isDevelopment = NODE_ENV === 'development';
     
-    if (error.statusCode && error.statusCode < 500) {
+    // Type guard for error with statusCode
+    const hasStatusCode = (err: unknown): err is { statusCode: number; name: string; message: string; stack?: string } => {
+      return typeof err === 'object' && err !== null && 'statusCode' in err;
+    };
+    
+    if (hasStatusCode(error) && error.statusCode < 500) {
       // Client errors - safe to return
       reply.status(error.statusCode).send({
         statusCode: error.statusCode,
@@ -207,11 +200,14 @@ export async function buildServer() {
       });
     } else {
       // Server errors - sanitize
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+      const errorStack = error instanceof Error ? error.stack : undefined;
+      
       reply.status(500).send({
         statusCode: 500,
         error: 'Internal Server Error',
-        message: isDevelopment ? error.message : 'An unexpected error occurred',
-        ...(isDevelopment && { stack: error.stack })
+        message: isDevelopment ? errorMessage : 'An unexpected error occurred',
+        ...(isDevelopment && errorStack && { stack: errorStack })
       });
     }
   });

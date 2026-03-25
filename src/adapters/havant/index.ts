@@ -19,6 +19,7 @@ import type {
   AdapterHealth,
   AdapterSecurityProfile,
   AcquisitionMetadata,
+  AddressCandidate,
 } from '../base/adapter.interface.js';
 import {
   LookupMethod,

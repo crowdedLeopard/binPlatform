@@ -21,7 +21,7 @@ export async function initStorage(config: StorageConfig): Promise<void> {
   // Create container if it doesn't exist
   try {
     await containerClient.createIfNotExists({
-      access: 'private'
+      access: undefined
     });
     logger.info({ container: containerName }, 'Storage container ready');
   } catch (err) {
@@ -66,7 +66,7 @@ export async function downloadEvidence(blobName: string): Promise<Buffer> {
   const chunks: Buffer[] = [];
 
   for await (const chunk of downloadResponse.readableStreamBody!) {
-    chunks.push(chunk);
+    chunks.push(chunk as Buffer);
   }
 
   return Buffer.concat(chunks);

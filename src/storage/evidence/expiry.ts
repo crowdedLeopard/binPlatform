@@ -74,7 +74,7 @@ let blobClient: BlobStorageClient | null = null;
 
 export function setBlobStorageClient(client: BlobStorageClient): void {
   blobClient = client;
-  logger.info('Blob storage client configured for evidence expiry');
+  logger.info({}, 'Blob storage client configured for evidence expiry');
 }
 
 // =============================================================================
@@ -104,12 +104,12 @@ export async function setEvidenceExpiry(
 
   await blobClient.setMetadata(blobRef, metadata);
 
-  logger.debug('Evidence expiry set', {
+  logger.debug({
     blobRef,
     expiresAt: expiresAt.toISOString(),
     councilId,
     evidenceType,
-  });
+  }, 'Evidence expiry set');
 }
 
 /**
@@ -132,7 +132,7 @@ export async function listExpiredEvidence(): Promise<ExpiredEvidence[]> {
 
     // Check if has expiry metadata
     if (!metadata.expiresAt) {
-      logger.warn('Blob missing expiry metadata', { blobRef });
+      logger.warn({ blobRef }, 'Blob missing expiry metadata');
       continue;
     }
 
@@ -153,10 +153,10 @@ export async function listExpiredEvidence(): Promise<ExpiredEvidence[]> {
     }
   }
 
-  logger.info('Listed expired evidence', {
+  logger.info({
     total: blobs.length,
     expired: expired.length,
-  });
+  }, 'Listed expired evidence');
 
   return expired;
 }
@@ -200,12 +200,12 @@ export async function deleteEvidence(
   // Delete blob
   await blobClient.deleteBlob(blobRef);
 
-  logger.info('Evidence deleted', {
+  logger.info({
     blobRef,
     reason,
     councilId,
     evidenceType,
-  });
+  }, 'Evidence deleted');
 }
 
 /**
@@ -218,18 +218,18 @@ export async function deleteExpiredEvidence(
 ): Promise<DeleteResult[]> {
   const results: DeleteResult[] = [];
 
-  logger.info('Deleting expired evidence', {
+  logger.info({
     count: expiredList.length,
     dryRun,
-  });
+  }, 'Deleting expired evidence');
 
   for (const evidence of expiredList) {
     if (dryRun) {
-      logger.info('[DRY RUN] Would delete evidence', {
+      logger.info({
         blobRef: evidence.blobRef,
         daysExpired: evidence.daysExpired,
         councilId: evidence.councilId,
-      });
+      }, '[DRY RUN] Would delete evidence');
 
       results.push({
         blobRef: evidence.blobRef,
@@ -249,10 +249,10 @@ export async function deleteExpiredEvidence(
         deleted: true,
       });
     } catch (error) {
-      logger.error('Failed to delete evidence', {
+      logger.error({
         blobRef: evidence.blobRef,
         error,
-      });
+      }, 'Failed to delete evidence');
 
       results.push({
         blobRef: evidence.blobRef,
@@ -265,12 +265,12 @@ export async function deleteExpiredEvidence(
   const successCount = results.filter(r => r.deleted).length;
   const failureCount = results.filter(r => !r.deleted && !dryRun).length;
 
-  logger.info('Expired evidence deletion complete', {
+  logger.info({
     total: expiredList.length,
     successCount,
     failureCount,
     dryRun,
-  });
+  }, 'Expired evidence deletion complete');
 
   return results;
 }

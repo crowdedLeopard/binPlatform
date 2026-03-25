@@ -250,7 +250,7 @@ export async function injectionDetection(c: Context, next: Next): Promise<Respon
     );
     
     // Log details (not in audit trail, in application log)
-    logger.warn('Injection attempt blocked', {
+    logger.warn({
       location: scan.location,
       patternType: scan.patternType,
       clientIp,
@@ -258,7 +258,7 @@ export async function injectionDetection(c: Context, next: Next): Promise<Respon
       method: c.req.method,
       // DO NOT log the actual malicious value in production
       // valuePreview: scan.value?.substring(0, 50),
-    });
+    }, 'Injection attempt blocked');
     
     // Return generic error (do not reveal detection logic)
     return c.json(

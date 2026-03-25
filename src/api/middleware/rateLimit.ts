@@ -15,7 +15,7 @@
  */
 
 import type { Context, Next } from 'hono';
-import type { RedisClientType } from 'redis';
+import type Redis from 'ioredis';
 import { ApiError, ErrorCode, rateLimited } from '../errors.js';
 
 export interface RateLimitConfig {
@@ -111,7 +111,7 @@ function getClientIdentifier(c: Context): { ip: string; apiKey?: string } {
  * Check rate limit against Redis
  */
 async function checkRateLimit(
-  redis: RedisClientType,
+  redis: Redis,
   key: string,
   maxRequests: number,
   windowSeconds: number
@@ -124,13 +124,13 @@ async function checkRateLimit(
     const multi = redis.multi();
     
     // Remove expired entries
-    multi.zRemRangeByScore(key, 0, windowStart);
+    multi.zremrangebyscore(key, '0', String(windowStart));
     
     // Count current requests in window
-    multi.zCard(key);
+    multi.zcard(key);
     
     // Add current request
-    multi.zAdd(key, { score: now, value: `${now}-${Math.random()}` });
+    multi.zadd(key, now, `${now}-${Math.random()}`);
     
     // Set expiry
     multi.expire(key, windowSeconds);
@@ -138,7 +138,7 @@ async function checkRateLimit(
     const results = await multi.exec();
     
     // Get count (after removing expired but before adding new)
-    const count = (results[1] as number) || 0;
+    const count = (results?.[1]?.[1] as number) || 0;
     
     const allowed = count < maxRequests;
     const remaining = Math.max(0, maxRequests - count - 1);
@@ -157,7 +157,7 @@ async function checkRateLimit(
  * 
  * Creates middleware that enforces rate limits based on configuration.
  */
-export function rateLimitMiddleware(redis: RedisClientType, config: RateLimitConfig) {
+export function rateLimitMiddleware(redis: Redis, config: RateLimitConfig) {
   return async (c: Context, next: Next) => {
     const { ip, apiKey } = getClientIdentifier(c);
     const requestId = c.get('requestId');
@@ -221,7 +221,7 @@ export function rateLimitMiddleware(redis: RedisClientType, config: RateLimitCon
  * Create rate limiter for specific endpoint tier
  */
 export function createRateLimiter(
-  redis: RedisClientType,
+  redis: Redis,
   tier: keyof typeof RATE_LIMITS
 ) {
   return rateLimitMiddleware(redis, RATE_LIMITS[tier]);
@@ -231,7 +231,7 @@ export function createRateLimiter(
  * Fastify-compatible rate limit hook
  */
 export async function rateLimitByKey(
-  redis: RedisClientType,
+  redis: Redis,
   config: RateLimitConfig,
   request: any,
   reply: any

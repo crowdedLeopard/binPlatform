@@ -139,7 +139,7 @@ async function trackPostcodeLookup(ipAnon: string, postcode: string): Promise<nu
       uniquePostcodes += count;
     }
   } catch (error) {
-    logger.error('Failed to track enumeration', { error, ipAnon });
+    logger.error({ error, ipAnon }, 'Failed to track enumeration');
     return 0;
   }
   
@@ -159,7 +159,7 @@ async function isHardBlocked(ipAnon: string): Promise<boolean> {
     const blocked = await redisClient.get(blockKey);
     return blocked === '1';
   } catch (error) {
-    logger.error('Failed to check hard block status', { error, ipAnon });
+    logger.error({ error, ipAnon }, 'Failed to check hard block status');
     return false;
   }
 }
@@ -176,7 +176,7 @@ async function setHardBlock(ipAnon: string, durationSeconds: number): Promise<vo
     const blockKey = `enumeration:hardblock:${ipAnon}`;
     await redisClient.setex(blockKey, durationSeconds, '1');
   } catch (error) {
-    logger.error('Failed to set hard block', { error, ipAnon });
+    logger.error({ error, ipAnon }, 'Failed to set hard block');
   }
 }
 
@@ -245,11 +245,11 @@ export async function enumerationDetection(c: Context, next: Next): Promise<Resp
       count: uniquePostcodes,
     });
     
-    logger.warn('Enumeration hard block activated', {
+    logger.warn({
       ipAnon,
       uniquePostcodes,
       threshold: HARD_BLOCK_THRESHOLD,
-    });
+    }, 'Enumeration hard block activated');
     
     return c.json(
       {
@@ -272,12 +272,12 @@ export async function enumerationDetection(c: Context, next: Next): Promise<Resp
       count: uniquePostcodes,
     });
     
-    logger.warn('Enumeration soft block - adding delay', {
+    logger.warn({
       ipAnon,
       uniquePostcodes,
       threshold: SOFT_BLOCK_THRESHOLD,
       delayMs: SOFT_BLOCK_DELAY_MS,
-    });
+    }, 'Enumeration soft block - adding delay');
     
     // Add artificial delay to degrade bot performance
     // Delay increases with count
@@ -329,7 +329,7 @@ export async function getEnumerationStats(ipAnon: string): Promise<{
       softBlocked,
     };
   } catch (error) {
-    logger.error('Failed to get enumeration stats', { error, ipAnon });
+    logger.error({ error, ipAnon }, 'Failed to get enumeration stats');
     return {
       uniquePostcodes: 0,
       hardBlocked: false,

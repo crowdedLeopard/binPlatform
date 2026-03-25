@@ -125,11 +125,11 @@ export async function getSecurityEvents(c: Context): Promise<Response> {
     // Query events
     const result = await querySecurityEvents(filter);
     
-    logger.info('Security events queried', {
+    logger.info({
       filter,
       resultCount: result.events.length,
       total: result.total,
-    });
+    }, 'Security events queried');
     
     return c.json({
       success: true,
@@ -142,7 +142,7 @@ export async function getSecurityEvents(c: Context): Promise<Response> {
       },
     });
   } catch (error) {
-    logger.error('Failed to query security events', { error });
+    logger.error({ error }, 'Failed to query security events');
     
     return c.json(
       {
@@ -170,10 +170,10 @@ export async function getCriticalEvents(c: Context): Promise<Response> {
     
     const events = await getCriticalEventsRecent(hours);
     
-    logger.info('Critical events retrieved', {
+    logger.info({
       hours,
       eventCount: events.length,
-    });
+    }, 'Critical events retrieved');
     
     return c.json({
       success: true,
@@ -181,7 +181,7 @@ export async function getCriticalEvents(c: Context): Promise<Response> {
       lookbackHours: hours,
     });
   } catch (error) {
-    logger.error('Failed to retrieve critical events', { error });
+    logger.error({ error }, 'Failed to retrieve critical events');
     
     return c.json(
       {
@@ -223,10 +223,10 @@ export async function getCouncilEvents(c: Context): Promise<Response> {
     
     const events = await getRecentEventsByCouncil(councilId, limit);
     
-    logger.info('Council events retrieved', {
+    logger.info({
       councilId,
       eventCount: events.length,
-    });
+    }, 'Council events retrieved');
     
     return c.json({
       success: true,
@@ -234,7 +234,7 @@ export async function getCouncilEvents(c: Context): Promise<Response> {
       events,
     });
   } catch (error) {
-    logger.error('Failed to retrieve council events', { error });
+    logger.error({ error }, 'Failed to retrieve council events');
     
     return c.json(
       {
@@ -280,11 +280,11 @@ export async function getIpAbuseEvents(c: Context): Promise<Response> {
     
     const events = await getAbuseEventsByIp(ipAnon, hours);
     
-    logger.info('IP abuse events retrieved', {
+    logger.info({
       ipAnon, // Never log raw IP
       eventCount: events.length,
       hours,
-    });
+    }, 'IP abuse events retrieved');
     
     return c.json({
       success: true,
@@ -293,7 +293,7 @@ export async function getIpAbuseEvents(c: Context): Promise<Response> {
       lookbackHours: hours,
     });
   } catch (error) {
-    logger.error('Failed to retrieve IP abuse events', { error });
+    logger.error({ error }, 'Failed to retrieve IP abuse events');
     
     return c.json(
       {
@@ -339,13 +339,13 @@ export async function getSecurityStats(c: Context): Promise<Response> {
       e.eventType.startsWith('abuse.'),
     );
     
-    logger.info('Security stats retrieved', {
+    logger.info({
       hours,
       criticalCount: critical.total,
       warningCount: warning.total,
       infoCount: info.total,
       abuseCount: abuseEvents.length,
-    });
+    }, 'Security stats retrieved');
     
     return c.json({
       success: true,
@@ -367,7 +367,7 @@ export async function getSecurityStats(c: Context): Promise<Response> {
       },
     });
   } catch (error) {
-    logger.error('Failed to retrieve security stats', { error });
+    logger.error({ error }, 'Failed to retrieve security stats');
     
     return c.json(
       {

@@ -46,11 +46,11 @@ export class RetentionWorker {
   constructor(retentionEngine: RetentionEngine) {
     this.retentionEngine = retentionEngine;
 
-    logger.info('Retention worker initialized', {
+    logger.info({
       schedule: retentionEngine.getSchedule(),
       dryRun: RETENTION_DRY_RUN,
       batchSize: MAX_PURGE_BATCH_SIZE,
-    });
+    }, 'Retention worker initialized');
   }
 
   /**
@@ -63,20 +63,20 @@ export class RetentionWorker {
     }
 
     this.isRunning = true;
-    logger.info('Retention worker starting', {
+    logger.info({
       dryRun: RETENTION_DRY_RUN,
       batchSize: MAX_PURGE_BATCH_SIZE,
-    });
+    }, 'Retention worker starting');
 
     try {
       // Step 1: Scan for expired data
       const scanResult = await this.retentionEngine.scanExpired();
 
-      logger.info('Retention scan complete', {
+      logger.info({
         totalExpiredRecords: scanResult.totalExpiredRecords,
         estimatedStorageBytes: scanResult.estimatedStorageBytes,
         dataTypes: Array.from(scanResult.expiredByType.keys()),
-      });
+      }, 'Retention scan complete');
 
       // Step 2: Log to audit what will be purged
       auditLogger.log({
@@ -109,23 +109,23 @@ export class RetentionWorker {
         ? (purgeResult.failures.length / purgeResult.totalPurgedRecords) * 100
         : 0;
 
-      logger.info('Retention purge complete', {
+      logger.info({
         purgeId: purgeResult.purgeId,
         dryRun: purgeResult.dryRun,
         totalPurgedRecords: purgeResult.totalPurgedRecords,
         totalPurgedBytes: purgeResult.totalPurgedBytes,
         failureCount: purgeResult.failures.length,
         failureRate: `${failureRate.toFixed(2)}%`,
-      });
+      }, 'Retention purge complete');
 
       // Step 5: Emit security event if failures exceed threshold
       if (failureRate > FAILURE_THRESHOLD_PERCENT) {
-        logger.error('Retention purge failure threshold exceeded', {
+        logger.error({
           purgeId: purgeResult.purgeId,
           failureRate: `${failureRate.toFixed(2)}%`,
           threshold: `${FAILURE_THRESHOLD_PERCENT}%`,
           failures: purgeResult.failures,
-        });
+        }, 'Retention purge failure threshold exceeded');
 
         auditLogger.log({
           eventType: 'security.upstream_anomaly' as any, // TODO: Add RETENTION_FAILURE event type
@@ -146,7 +146,7 @@ export class RetentionWorker {
 
       return purgeResult;
     } catch (error) {
-      logger.error('Retention worker failed', { error });
+      logger.error({ error }, 'Retention worker failed');
 
       auditLogger.log({
         eventType: 'security.upstream_anomaly' as any, // TODO: Add RETENTION_FAILURE event type
@@ -217,10 +217,10 @@ export async function createRetentionWorker(
     //   await worker.run();
     // });
 
-    logger.info('Retention worker scheduler started', {
+    logger.info({
       schedule: retentionEngine.getSchedule(),
       dryRun: RETENTION_DRY_RUN,
-    });
+    }, 'Retention worker scheduler started');
   }
 
   return worker;

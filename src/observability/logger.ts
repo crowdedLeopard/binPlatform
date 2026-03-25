@@ -1,4 +1,4 @@
-import pino from 'pino';
+import pino, { stdSerializers, stdTimeFunctions } from 'pino';
 
 const logLevel = process.env.LOG_LEVEL || 'info';
 const isPretty = process.env.LOG_PRETTY === 'true' || process.env.NODE_ENV === 'development';
@@ -59,7 +59,7 @@ export const logger = pino({
       }
     }),
     
-    err: pino.stdSerializers.err
+    err: stdSerializers.err
   },
   
   // Pretty print in development
@@ -80,7 +80,7 @@ export const logger = pino({
   },
   
   // ISO timestamp
-  timestamp: pino.stdTimeFunctions.isoTime
+  timestamp: stdTimeFunctions.isoTime
 });
 
 /**

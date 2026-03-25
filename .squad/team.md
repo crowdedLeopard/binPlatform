@@ -17,6 +17,7 @@
 | Amos | 🔒 Security Engineer | `.squad/agents/amos/charter.md` | ✅ Active |
 | Bobbie | 🧪 Tester / QA | `.squad/agents/bobbie/charter.md` | ✅ Active |
 | Drummer | ⚙️ DevOps / Infra | `.squad/agents/drummer/charter.md` | ✅ Active |
+| Alex | 🔧 TypeScript / Full-Stack | `.squad/agents/alex/charter.md` | ✅ Active |
 | Scribe | 📋 Session Logger | `.squad/agents/scribe/charter.md` | ✅ Active |
 | Ralph | 🔄 Work Monitor | — | ✅ Active |
 

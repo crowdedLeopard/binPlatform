@@ -107,7 +107,7 @@ async function getRateLimitStatus(
 
     return { count, ttl: ttl > 0 ? ttl : config.windowSeconds };
   } catch (error) {
-    logger.error('Failed to check rate limit', { error, ip, tier });
+    logger.error({ error, ip, tier }, 'Failed to check rate limit');
     return { count: 0, ttl: 0 };
   }
 }
@@ -182,13 +182,13 @@ export async function endpointRateLimiting(c: Context, next: Next): Promise<Resp
       tier,
     });
 
-    logger.warn('Endpoint rate limit exceeded', {
+    logger.warn({
       clientIp,
       tier,
       count: status.count,
       limit: config.maxRequests,
       path: c.req.path,
-    });
+    }, 'Endpoint rate limit exceeded');
 
     // Return 429 with retry-after header
     return c.json(

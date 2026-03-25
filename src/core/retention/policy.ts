@@ -146,7 +146,7 @@ export const RETENTION_POLICY: Record<DataType, RetentionConfig> = {
   },
   'user-input-log': {
     maxAgeDays: 30,
-    purgeStrategy: 'hard-delete-db',
+    purgeStrategy: 'hard-delete-blob',
     description: 'Request logs with user inputs (minimal retention)',
   },
   'api-key': {
@@ -200,10 +200,10 @@ export class RetentionPolicyEngine implements RetentionEngine {
     this.deploymentTimestamp = new Date();
     this.scanners = scanners;
 
-    logger.info('Retention policy engine initialized', {
+    logger.info({
       dataTypes: Array.from(scanners.keys()),
       gracePeriodHours: DEPLOYMENT_GRACE_PERIOD_HOURS,
-    });
+    }, 'Retention policy engine initialized');
   }
 
   /**
@@ -216,14 +216,14 @@ export class RetentionPolicyEngine implements RetentionEngine {
     let totalExpiredRecords = 0;
     let estimatedStorageBytes = 0;
 
-    logger.info('Starting retention scan', { scanId });
+    logger.info({ scanId }, 'Starting retention scan');
 
     for (const [dataType, scanner] of this.scanners) {
       const config = RETENTION_POLICY[dataType];
 
       // Skip if no retention limit
       if (config.maxAgeDays === null) {
-        logger.debug('Skipping data type (no retention limit)', { dataType });
+        logger.debug({ dataType }, 'Skipping data type (no retention limit)');
         continue;
       }
 
@@ -236,20 +236,20 @@ export class RetentionPolicyEngine implements RetentionEngine {
           totalExpiredRecords += expiredData.recordCount;
           estimatedStorageBytes += await scanner.estimateStorageSize(expiredData);
 
-          logger.info('Expired data found', {
+          logger.info({
             scanId,
             dataType,
             recordCount: expiredData.recordCount,
             oldestRecord: expiredData.oldestRecord,
             newestRecord: expiredData.newestRecord,
-          });
+          }, 'Expired data found');
         }
       } catch (error) {
-        logger.error('Failed to scan data type', {
+        logger.error({
           scanId,
           dataType,
           error,
-        });
+        }, 'Failed to scan data type');
       }
     }
 
@@ -261,12 +261,12 @@ export class RetentionPolicyEngine implements RetentionEngine {
       estimatedStorageBytes,
     };
 
-    logger.info('Retention scan complete', {
+    logger.info({
       scanId,
       totalExpiredRecords,
       estimatedStorageBytes,
       dataTypes: Array.from(expiredByType.keys()),
-    });
+    }, 'Retention scan complete');
 
     return result;
   }
@@ -302,12 +302,12 @@ export class RetentionPolicyEngine implements RetentionEngine {
       },
     });
 
-    logger.info('Starting retention purge', {
+    logger.info({
       purgeId,
       dryRun: options.dryRun,
       batchSize: options.batchSize,
       dataTypes: options.dataTypes || 'all',
-    });
+    }, 'Starting retention purge');
 
     const purgedByType = new Map<DataType, PurgedDataSet>();
     const failures: PurgeFailure[] = [];
@@ -320,7 +320,7 @@ export class RetentionPolicyEngine implements RetentionEngine {
     for (const dataType of dataTypesToProcess) {
       const scanner = this.scanners.get(dataType);
       if (!scanner) {
-        logger.warn('No scanner for data type', { dataType });
+        logger.warn({ dataType }, 'No scanner for data type');
         continue;
       }
 
@@ -328,7 +328,7 @@ export class RetentionPolicyEngine implements RetentionEngine {
 
       // Skip if no retention limit
       if (config.maxAgeDays === null) {
-        logger.debug('Skipping data type (no retention limit)', { dataType });
+        logger.debug({ dataType }, 'Skipping data type (no retention limit)');
         continue;
       }
 
@@ -358,20 +358,20 @@ export class RetentionPolicyEngine implements RetentionEngine {
           error: f.error,
         })));
 
-        logger.info('Purged data type', {
+        logger.info({
           purgeId,
           dataType,
           purgedCount: result.purgedCount,
           failedCount: result.failedCount,
           bytesReclaimed: result.bytesReclaimed,
           dryRun: options.dryRun,
-        });
+        }, 'Purged data type');
       } catch (error) {
-        logger.error('Failed to purge data type', {
+        logger.error({
           purgeId,
           dataType,
           error,
-        });
+        }, 'Failed to purge data type');
 
         failures.push({
           dataType,
@@ -411,13 +411,13 @@ export class RetentionPolicyEngine implements RetentionEngine {
       },
     });
 
-    logger.info('Retention purge complete', {
+    logger.info({
       purgeId,
       dryRun: options.dryRun,
       totalPurgedRecords,
       totalPurgedBytes,
       failureCount: failures.length,
-    });
+    }, 'Retention purge complete');
 
     return result;
   }

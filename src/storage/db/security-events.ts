@@ -73,10 +73,10 @@ export function setDatabaseClient(client: DatabaseClient): void {
  */
 export async function recordSecurityEvent(event: AuditEvent): Promise<void> {
   if (!dbClient) {
-    logger.warn('Database client not initialized, security event not persisted', {
+    logger.warn({
       eventId: event.eventId,
       eventType: event.eventType,
-    });
+    }, 'Database client not initialized, security event not persisted');
     return;
   }
   
@@ -115,17 +115,17 @@ export async function recordSecurityEvent(event: AuditEvent): Promise<void> {
     
     await dbClient.query(sql, params);
     
-    logger.debug('Security event persisted', {
+    logger.debug({
       eventId: event.eventId,
       eventType: event.eventType,
-    });
+    }, 'Security event persisted');
   } catch (error) {
     // Log error but do not throw - audit logging is best effort
-    logger.error('Failed to persist security event', {
+    logger.error({
       error,
       eventId: event.eventId,
       eventType: event.eventType,
-    });
+    }, 'Failed to persist security event');
   }
 }
 

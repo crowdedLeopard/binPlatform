@@ -230,13 +230,13 @@ export async function botDetection(c: Context, next: Next): Promise<Response | v
     });
 
     // Log details (application log, not audit trail)
-    logger.warn('Bot detected and blocked', {
+    logger.warn({
       category: botCheck.category,
       pattern: botCheck.pattern,
       clientIp,
       path: c.req.path,
       method: c.req.method,
-    });
+    }, 'Bot detected and blocked');
 
     // Return generic error (do not reveal detection logic)
     return c.json(
@@ -250,11 +250,11 @@ export async function botDetection(c: Context, next: Next): Promise<Response | v
 
   // Additional bot characteristics check (not blocking, just logging)
   if (hasBotCharacteristics(c)) {
-    logger.info('Suspicious bot characteristics detected', {
+    logger.info({
       userAgent: userAgent.substring(0, 100),
       path: c.req.path,
       missingHeaders: 'accept-language, accept-encoding, accept',
-    });
+    }, 'Suspicious bot characteristics detected');
   }
 
   // No bot detected, continue
@@ -271,12 +271,12 @@ export async function lenientBotDetection(c: Context, next: Next): Promise<void>
   const botCheck = isBotUserAgent(userAgent);
 
   if (botCheck.isBot) {
-    logger.info('Bot detected on public endpoint (not blocked)', {
+    logger.info({
       category: botCheck.category,
       pattern: botCheck.pattern,
       path: c.req.path,
       userAgentPreview: userAgent.substring(0, 100),
-    });
+    }, 'Bot detected on public endpoint (not blocked)');
   }
 
   // Continue regardless of bot detection
