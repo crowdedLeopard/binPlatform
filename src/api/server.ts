@@ -475,133 +475,6 @@ export async function buildServer() {
     };
   });
 
-  // API Routes
-  // v1/postcodes/:postcode/addresses - Resolve postcode to addresses
-  server.get('/v1/postcodes/:postcode/addresses', async (request: any, reply: any) => {
-    const { postcode } = request.params as { postcode: string };
-    
-    // Validate UK postcode format
-    if (!/^[A-Z]{1,2}[0-9][0-9A-Z]?\s?[0-9][A-Z]{2}$/i.test(postcode)) {
-      return reply.status(400).send({
-        statusCode: 400,
-        error: 'Bad Request',
-        message: 'Invalid UK postcode format',
-        postcode
-      });
-    }
-    
-    try {
-      // Resolve postcode to UPRNs
-      const addresses = await resolvePostcodeToUprn(postcode);
-      
-      if (addresses.length === 0) {
-        return reply.status(404).send({
-          statusCode: 404,
-          error: 'Not Found',
-          message: `No addresses found for postcode '${postcode}'. Try SO50 5PN (Eastleigh) or PO16 7XX (Fareham) for demo.`,
-          postcode
-        });
-      }
-      
-      // Return addresses in standardized format
-      return {
-        postcode: postcode.toUpperCase().trim(),
-        addresses: addresses.map(addr => ({
-          id: `${addr.councilId}:${addr.uprn}`,
-          address: addr.address,
-          uprn: addr.uprn,
-          councilId: addr.councilId,
-          confidence: addr.confidence
-        })),
-        count: addresses.length,
-        timestamp: new Date().toISOString()
-      };
-    } catch (error) {
-      request.log.error({ err: error, postcode }, 'Failed to resolve postcode');
-      return reply.status(500).send({
-        statusCode: 500,
-        error: 'Internal Server Error',
-        message: 'Failed to resolve postcode'
-      });
-    }
-  });
-  
-  // v1/properties/:propertyId/collections - Get bin collection schedule
-  server.get('/v1/properties/:propertyId/collections', async (request: any, reply: any) => {
-    const { propertyId } = request.params as { propertyId: string };
-    
-    // Property ID format: councilId:uprn
-    const [councilId, uprn] = propertyId.split(':');
-    
-    if (!councilId || !uprn) {
-      return reply.status(400).send({
-        statusCode: 400,
-        error: 'Bad Request',
-        message: 'Invalid property ID format. Expected format: councilId:uprn (e.g., eastleigh:100060321174)',
-        propertyId
-      });
-    }
-    
-    // Check if council is supported
-    if (!isCouncilSupported(councilId)) {
-      return reply.status(404).send({
-        statusCode: 404,
-        error: 'Not Found',
-        message: `Council '${councilId}' not found or disabled`,
-        councilId
-      });
-    }
-    
-    try {
-      // Get adapter for council
-      const adapter = getAdapter(councilId);
-      
-      // Get collection events
-      const result = await adapter.getCollectionEvents({ 
-        councilLocalId: uprn,
-        uprn: uprn,
-        address: '',
-        postcode: '',
-        correlationId: request.id || 'unknown'
-      });
-      
-      if (!result.success) {
-        return reply.status(503).send({
-          statusCode: 503,
-          error: 'Service Unavailable',
-          message: result.errorMessage || 'Failed to fetch collection data',
-          failureCategory: result.failureCategory
-        });
-      }
-      
-      // Return collection events
-      return {
-        propertyId,
-        councilId,
-        uprn,
-        collections: result.data?.map(event => ({
-          date: event.collectionDate,
-          serviceType: event.serviceType,
-          serviceId: event.serviceId,
-          isConfirmed: event.isConfirmed,
-          isRescheduled: event.isRescheduled,
-          notes: event.notes
-        })) || [],
-        count: result.data?.length || 0,
-        confidence: result.confidence,
-        timestamp: new Date().toISOString(),
-        sourceEvidenceRef: result.sourceEvidenceRef
-      };
-    } catch (error) {
-      request.log.error({ err: error, propertyId, councilId, uprn }, 'Failed to fetch collections');
-      return reply.status(500).send({
-        statusCode: 500,
-        error: 'Internal Server Error',
-        message: error instanceof Error ? error.message : 'Failed to fetch collection data'
-      });
-    }
-  });
-  
   // Inline v1 routes — council registry served from data/council-registry.json
   server.get('/v1/councils', async () => ({
     councils: councilRegistry.map(c => ({
@@ -1025,13 +898,31 @@ export async function buildServer() {
         };
       }
 
-      // No councilId — require it for now
-      return reply.code(400).send({
-        statusCode: 400,
-        error: 'Bad Request',
-        message: 'councilId query parameter required',
-        hint: 'Specify ?councilId=<council-id> to query a specific council',
-      });
+      // No councilId — use UPRN resolution service
+      const addresses = await resolvePostcodeToUprn(normalizedPostcode);
+      
+      if (addresses.length === 0) {
+        return reply.code(404).send({
+          statusCode: 404,
+          error: 'Not Found',
+          message: `No addresses found for postcode '${normalizedPostcode}'. Try SO50 5PN (Eastleigh) or PO16 7XX (Fareham) for demo.`,
+          postcode: normalizedPostcode
+        });
+      }
+      
+      return {
+        postcode: normalizedPostcode,
+        addresses: addresses.map(addr => ({
+          id: `${addr.councilId}:${addr.uprn}`,
+          address: addr.address,
+          uprn: addr.uprn,
+          council_id: addr.councilId,
+          confidence: addr.confidence
+        })),
+        count: addresses.length,
+        source_method: 'uprn_lookup',
+        source_timestamp: new Date().toISOString()
+      };
     } catch (error) {
       request.log.error({ err: error, postcode: normalizedPostcode, councilId }, 'Address lookup error');
       return reply.code(500).send({
