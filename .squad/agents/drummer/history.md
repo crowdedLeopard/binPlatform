@@ -628,3 +628,152 @@ Discovery credit: UKBinCollectionData project (robbrad/UKBinCollectionData)
 - Monitor Southampton endpoint for Incapsula policy changes
 - Add health monitoring for both adapters
 - Consider UPRN resolution service integration for full postcode → collections flow
+
+---
+
+### 2026-03-25 - Admin Endpoints for Adapter Management
+
+**Task:** Build admin endpoints for runtime adapter management, drift detection, and health diagnostics
+
+**Context:**
+When councils change their websites, the team needs tools to detect it, diagnose it, and fix it without redeployment.
+
+**Implementation:**
+
+**Admin Authentication:**
+- Added `adminAuth` middleware using `BOOTSTRAP_ADMIN_KEY` environment variable
+- Returns 401 unauthorized if key missing or incorrect
+- Applied to all `/v1/admin/*` routes via `preHandler` hook
+
+**Endpoints Delivered:**
+
+1. **GET /v1/admin/adapters** - List all adapter statuses
+   - Returns council ID, name, status, kill switch state, confidence score
+   - Shows implementation class name (e.g., "EastleighAdapter" or "N/A")
+   - Includes runtime disabled state (in-memory flags)
+
+2. **GET /v1/admin/adapters/:councilId/health** - Deep health check
+   - Calls adapter's `verifyHealth()` method directly
+   - Returns full health diagnostic including upstreamReachable, schemaDriftDetected
+   - 404 if council not registered, 500 if health check fails
+
+3. **POST /v1/admin/adapters/:councilId/drift-check** - Schema drift detection
+   - Makes real test request using postcode from `data/test-postcodes.json`
+   - Computes SHA-256 hash of response data structure
+   - Compares to stored snapshot, detects drift
+   - Returns recommendation: baseline/no action/review implementation
+   - Updates snapshot automatically for future comparisons
+
+4. **POST /v1/admin/adapters/:councilId/disable** - Runtime disable
+   - Disables adapter without redeployment or environment variable changes
+   - Stores reason and timestamp in-memory (Map)
+   - Survives until process restart
+   - Returns disabled status with timestamp
+
+5. **POST /v1/admin/adapters/:councilId/enable** - Runtime enable
+   - Clears runtime disabled flag
+   - Returns enabled status with timestamp
+   - Returns `was_disabled: true/false` to confirm previous state
+
+6. **GET /v1/admin/drift** - Mass drift check
+   - Runs drift check on ALL 13 councils in parallel
+   - Uses test postcodes from `data/test-postcodes.json`
+   - Returns summary: total, ok, drifted, unreachable counts
+   - Full results array with per-council status
+   - Stores result in `lastDriftCheck` for status page display
+   - Handles councils with no test postcode, not supported, or disabled
+
+7. **GET /v1/admin/adapters/:councilId/test** - Test with sample postcode
+   - Executes full address lookup with test postcode
+   - Measures duration_ms, counts addresses returned
+   - Returns confidence score, success status
+   - Full result object included for debugging
+
+**Test Postcodes Created:**
+- Created `data/test-postcodes.json` with postcodes for all 13 councils
+- Examples: RG21 4AF (Basingstoke), SO50 5SF (Eastleigh), PO1 3AH (Portsmouth)
+- Used by drift check and test endpoints
+
+**Status Page Enhancement:**
+- Added "Drift Status" section showing:
+  - Last check timestamp (human-readable)
+  - Adapters OK count (e.g., "10 / 13")
+  - Drifted count (red if > 0)
+  - Unreachable count (orange if > 0)
+- Updated "Hampshire Councils" table:
+  - Changed "Adapter Status" column to "Implementation"
+  - Shows "Implemented", "Stub", or "Not Implemented"
+  - Clearer than previous status values
+
+**Runtime State Management:**
+- In-memory Maps for disabled adapters and schema snapshots
+- `disabledAdapters`: Map<councilId, { reason, disabled_at }>
+- `schemaSnapshots`: Map<councilId, { hash, captured_at }>
+- `lastDriftCheck`: Full summary object with counts and results
+- All state lost on process restart (by design, not persistent)
+
+**Security Considerations:**
+- Admin key required (NOT in git, environment variable only)
+- Added 'X-Admin-Key' to CORS allowedHeaders
+- No public exposure of admin endpoints (authentication required)
+- Drift checks make real requests (rate limiting still applies)
+- Test postcodes are public (no PII)
+
+**TypeScript Type Safety:**
+- Fully typed lastDriftCheck: `{ checked_at, total, ok, drifted, unreachable, results }`
+- Imported `createHash` from crypto for SHA-256 hashing
+- Type-safe error handling with proper status codes
+
+**Git Commit:**
+- Commit 9aa6937: "feat: add admin endpoints for adapter management, drift detection, and health checks"
+- Already pushed to origin/master
+- TypeScript build successful (no errors)
+
+**Deliverables:**
+- ✓ 7 admin endpoints implemented
+- ✓ Test postcodes created for all 13 councils
+- ✓ Status page updated with drift section
+- ✓ TypeScript compilation clean
+- ✓ Git commit and push completed
+- ✓ History documentation updated
+- ⏳ Decision document creation
+
+**Key Learnings:**
+1. In-memory state is acceptable for admin operations (not critical to lose on restart)
+2. SHA-256 hashing of response structures is effective for drift detection
+3. Test postcodes enable automated health checks without hardcoding in code
+4. Runtime disable/enable provides emergency response capability
+5. Mass drift check identifies problems across all councils quickly
+6. Admin authentication via header is simple and effective for internal tools
+7. Drift detection snapshots auto-update (always comparing to previous, not hardcoded baseline)
+
+**Operational Usage:**
+```bash
+# List all adapter statuses
+curl -H "X-Admin-Key: $BOOTSTRAP_ADMIN_KEY" http://localhost:3000/v1/admin/adapters
+
+# Deep health check for Eastleigh
+curl -H "X-Admin-Key: $BOOTSTRAP_ADMIN_KEY" http://localhost:3000/v1/admin/adapters/eastleigh/health
+
+# Check drift for Eastleigh
+curl -X POST -H "X-Admin-Key: $BOOTSTRAP_ADMIN_KEY" http://localhost:3000/v1/admin/adapters/eastleigh/drift-check
+
+# Disable Eastleigh adapter
+curl -X POST -H "X-Admin-Key: $BOOTSTRAP_ADMIN_KEY" -H "Content-Type: application/json" \
+  -d '{"reason":"Council website down for maintenance"}' \
+  http://localhost:3000/v1/admin/adapters/eastleigh/disable
+
+# Check drift on ALL councils
+curl -H "X-Admin-Key: $BOOTSTRAP_ADMIN_KEY" http://localhost:3000/v1/admin/drift
+
+# Test Eastleigh adapter with sample postcode
+curl -H "X-Admin-Key: $BOOTSTRAP_ADMIN_KEY" http://localhost:3000/v1/admin/adapters/eastleigh/test
+```
+
+**Next Steps:**
+- Add admin endpoints to API documentation (OpenAPI spec)
+- Consider persistent storage for drift snapshots (database)
+- Add admin endpoint for viewing drift history over time
+- Integrate with Grafana dashboards for drift visualization
+- Consider webhook notifications on drift detection
+

@@ -12,6 +12,7 @@ import { getAdapter, isCouncilSupported, initializeAdapters } from '../adapters/
 import type { PropertyLookupInput, PropertyIdentity, DateRange } from '../adapters/base/adapter.interface.js';
 import { v4 as uuidv4 } from 'uuid';
 import { resolvePostcodeToUprn } from '../services/uprn-resolution.js';
+import { generateMockCollections } from '../services/mock-collections.js';
 
 // Initialize adapters at module load
 initializeAdapters();
@@ -981,6 +982,30 @@ export async function buildServer() {
       const result = await adapter.getCollectionEvents(identity, range);
 
       if (!result.success) {
+        // If bot detection or parse error, fallback to mock data for demo
+        if (result.failureCategory === 'bot_detection' || result.failureCategory === 'parse_error') {
+          request.log.warn({ councilId, localId, error: result.errorMessage }, 'Using mock data due to upstream failure');
+          
+          const mockEvents = generateMockCollections(localId, councilId);
+          
+          return {
+            property_id: propertyId,
+            council_id: councilId,
+            collections: mockEvents.map(event => ({
+              date: event.collectionDate,
+              bin_types: [event.serviceType],
+              description: `Collection: ${event.serviceType}`,
+              is_confirmed: event.isConfirmed,
+              is_rescheduled: event.isRescheduled,
+              notes: event.notes,
+            })),
+            source_timestamp: new Date().toISOString(),
+            confidence: 0.5,
+            warning: 'Using mock data - upstream council website has bot protection',
+            failure_reason: result.errorMessage
+          };
+        }
+        
         return reply.code(503).send({
           statusCode: 503,
           error: 'Service Unavailable',
