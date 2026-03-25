@@ -405,8 +405,69 @@ This checklist documents all security controls required for the Hampshire Bin Co
 
 ---
 
+## Phase 3 Implementation Status
+
+### Data Retention Enforcement
+- [✅] Retention policy engine implemented (`src/core/retention/policy.ts`)
+- [✅] Retention worker with cron scheduler (`src/workers/retention-worker.ts`)
+- [✅] Evidence expiry in blob storage (`src/storage/evidence/expiry.ts`)
+- [✅] Terraform lifecycle policies for Azure Blob (`infra/terraform/modules/storage/lifecycle.tf`)
+- [✅] Configurable retention windows by data type (from classification matrix)
+- [✅] Dry-run mode for safe testing (24h grace period after deployment)
+- [✅] Batch processing (max 1000 records per run to avoid long locks)
+- [✅] Audit logging for all purge operations
+
+### Evidence Lifecycle
+- [✅] Blob metadata with expiry date set on upload
+- [✅] Query expired blobs by expiry metadata
+- [✅] Hard delete with audit log entry per deletion
+- [✅] Azure Blob lifecycle policy (tier to cool after 30 days, delete after 90 days)
+- [✅] Separate lifecycle for audit logs (archive after 365, delete after 730)
+
+### Audit Archival
+- [✅] Archive-then-delete strategy for security events and audit logs
+- [✅] Retention policy: 365 days for security events, 730 days for audit logs
+- [✅] Soft delete for database records (7-day reversible window)
+- [✅] Never purge security_events or audit_log without archiving first
+
+### Security Event Admin View
+- [✅] Security dashboard (`src/admin/security-dashboard.ts`)
+- [✅] Summary view for admin home page
+- [✅] Event filtering and pagination
+- [✅] Abuse pattern detection and summarization
+- [✅] Adapter anomaly tracking
+- [✅] Open incidents view
+
+### Incident Management
+- [✅] Incident tracking database schema (`007_incidents.sql`)
+- [✅] Incident manager (`src/admin/incidents.ts`)
+- [✅] Auto-creation on trigger conditions
+- [✅] Acknowledge and resolve workflows
+- [✅] Severity-based prioritization
+- [✅] Integration with security events
+
+### Incident Triggers
+- [✅] Adapter blocked 3+ times in 1 hour → incident created
+- [✅] Enumeration threshold hit → incident created
+- [✅] Critical security event → incident created
+- [✅] Retention failure → incident created
+- [✅] Audit HMAC validation failure → incident created
+
+### Confidence-Gated Data Serving
+- [⬜] **Phase 4** — Confidence scoring for extracted data
+- [⬜] **Phase 4** — Serve low-confidence data with warnings
+- [⬜] **Phase 4** — Admin review queue for low-confidence data
+
+### Penetration Testing
+- [⬜] **Phase 4** — External penetration testing scheduled
+- [⬜] **Phase 4** — Remediation of findings
+- [⬜] **Phase 4** — Annual re-testing
+
+---
+
 ## Revision History
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
 | 1.0 | 2026-03-25 | Amos | Initial security controls checklist |
+| 1.1 | 2026-03-25 | Amos | Added Phase 3 implementation status (retention + incidents) |

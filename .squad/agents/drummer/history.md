@@ -171,3 +171,94 @@
 - Azure Firewall adds cost but enables domain-based egress filtering
 - Trivy may have false positives - mitigated with SARIF review in GitHub Security
 - Branch protection prevents quick hotfixes - emergency procedure documented
+
+### 2026-03-25 - Phase 3 Synthetic Monitoring and Drift Detection
+
+**Monitoring Infrastructure:**
+- Dedicated synthetic monitoring worker container (`deploy/Dockerfile.monitor`)
+- Separate observability stack (`docker-compose.observability.yml`) for local dev
+- Prometheus + Grafana + Alertmanager for metrics, visualization, and alerting
+- Metrics endpoint (`/metrics`) internal-network-only with IP allowlist protection
+- Health check: process-based (pgrep) for outbound-only worker (no HTTP ports)
+
+**Metrics Implementation:**
+- Full Prometheus client library integration (replaced stub implementation)
+- Real metrics: `adapter_health_status`, `adapter_confidence_score`, `adapter_drift_total`
+- Breaking drift counter: `adapter_drift_breaking_total` (immediate alert trigger)
+- Synthetic check metrics: `synthetic_check_success`, `synthetic_check_duration_seconds`
+- HTTP request tracking: `http_request_duration_seconds`, `http_requests_active`
+- Database status gauges: `redis_up`, `pg_up`
+- Histogram buckets optimized for API (5ms-10s) and acquisitions (0.1s-60s)
+
+**Alerting Rules:**
+- 8 Prometheus alert rules in `drift-detection.yml`
+- Critical alerts: `AdapterSchemaBreakingDrift` (0m grace), `AdapterUnavailable` (5m), `SyntheticCheckFailure` (10m)
+- Warning alerts: `AdapterConfidenceDegraded` (15m), `HighAbuseRate` (2m), `HighAcquisitionLatency` (10m)
+- Inhibition rules: suppress confidence alerts when adapter unavailable
+- Alertmanager routing: critical (0s wait, 5m repeat), warning (30s wait, 3h repeat)
+
+**Observability Stack Components:**
+- Prometheus 2.48.1 with 30-day retention, automatic rule reloading
+- Grafana 10.2.3 with provisioned datasource and dashboards
+- Alertmanager 0.26.0 with email/webhook receivers (Slack/Teams ready)
+- Adapter Health Overview dashboard (6 panels: health, confidence, drift, latency, rate, abuse)
+- Dashboard features: auto-refresh (10s), 1-hour default window, council_id filtering
+
+**CI/CD Integration:**
+- New GitHub Actions job: `synthetic-check` (runs on PRs to main)
+- Spins up full stack (postgres, redis, API) in CI
+- Executes lightweight synthetic checks against all adapters
+- Verifies each adapter returns valid health response (no crashes)
+- Uploads API logs on failure for debugging
+- Proper teardown with process cleanup
+
+**Terraform Monitoring Module:**
+- Azure Monitor Workspace (Log Analytics) with configurable retention (30-730 days)
+- Application Insights for API and Worker (separate instrumentation)
+- Action Group with dynamic email/webhook receivers
+- 5 metric alerts: adapter unavailable, confidence degraded, breaking drift, API errors, synthetic failures
+- 1 log query alert: high abuse rate (>50 blocks per 5min)
+- Dynamic criteria for API errors (auto-adjusting thresholds)
+- Diagnostic settings for workspace audit trail
+
+**Runbook Documentation:**
+- `docs/runbooks/synthetic-monitoring.md` - How to read results, manual triggers, canary management
+- `docs/runbooks/drift-response.md` - Step-by-step response for minor/major/breaking drift
+- Breaking drift SLA: kill switch within 15 minutes, fix within 24 hours
+- Escalation matrix: minor (7d), major (4h), breaking (immediate)
+- Drift prevention: multiple selector fallbacks, flexible parsing, council communication
+
+**Security Patterns:**
+- `/metrics` endpoint NEVER exposed to public internet (internal subnet only)
+- Monitor container: no exposed ports, outbound-only to internal API
+- Network isolation: monitor in `app-network` (no adapter-network access)
+- Non-root user (nodejs:1001) in monitor container
+- Package managers removed from runtime image
+
+**Operational Patterns:**
+- Canary postcodes: one representative per council (environment-configured)
+- Synthetic check interval: 5 minutes (configurable via `MONITOR_INTERVAL_MINUTES`)
+- Confidence score thresholds: <0.5 critical, 0.5-0.79 warning, 0.8+ healthy
+- Graceful degradation: kill switches prevent bad data during drift incidents
+- Post-incident reviews required for all breaking drift events
+
+**Configuration Management:**
+- Prometheus scrape configs for API and monitor jobs
+- Metric relabeling to drop sensitive label names (password, secret, token)
+- Grafana dashboard provisioning (no manual setup required)
+- Alertmanager templates ready for SMTP and webhook integration
+- Separate compose file allows opt-in observability for local dev
+
+**Key Decisions:**
+- Process-based health check for monitor (no HTTP server overhead)
+- Separate Application Insights for API vs Worker (clearer attribution)
+- IP-based allowlist for metrics endpoint (defense in depth)
+- Synthetic checks in CI verify adapter initialization (not full acquisitions)
+- Monitor container restarts: `unless-stopped` (resilient to transient failures)
+
+**Integration Points:**
+- Metrics exported by API at `GET /metrics` (Prometheus text format)
+- Worker publishes metrics to same registry (shared Redis optional)
+- CI synthetic-check job validates adapter health endpoints
+- Terraform monitoring module outputs instrumentation keys (Key Vault injection)
+- Grafana dashboards read from Prometheus datasource (auto-provisioned)

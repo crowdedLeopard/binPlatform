@@ -100,6 +100,33 @@ services:
     networks:
       - adapter-network
 
+  # Synthetic monitoring worker - runs health checks on a schedule
+  monitor:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.monitor
+    environment:
+      NODE_ENV: development
+      MONITOR_INTERVAL_MINUTES: 5
+      INTERNAL_API_URL: http://api:3000
+      REDIS_URL: redis://:redis_dev_password@redis:6379
+      DATABASE_URL: postgresql://binday:binday_dev_password@postgres:5432/binday
+      DATABASE_SSL: "false"
+      LOG_LEVEL: debug
+      LOG_PRETTY: "true"
+      # Canary postcodes for synthetic checks (one per council)
+      SYNTHETIC_CANARY_POSTCODES: SO16 0AS,PO1 2DX,GU14 7JF,RG21 4AH,SO50 4SR
+    depends_on:
+      api:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - app-network
+
 networks:
   app-network:
     driver: bridge

@@ -115,3 +115,86 @@ Drummer's bootstrap defaulted to Fastify, but this decision moves to Hono as the
 - Rate limiting middleware implementation (per-IP, per-key)
 - API key database schema and bcrypt comparison logic
 - Audit event table writes for kill switch operations
+
+### 2026-03-25: Phase 3 Confidence Scoring + Admin Dashboard Data Layer
+
+**Implementation Completed:**
+- **Confidence Scoring System** (`src/core/confidence/`):
+  - Weighted multi-factor scoring: method (35%), freshness (25%), validation (25%), health (15%)
+  - Method base scores: API=1.0, hidden_json=0.95, html_form=0.85, browser=0.75, pdf=0.7
+  - Freshness decay curves per method (API fresh 4h, PDF fresh 24h, then linear decay)
+  - Named thresholds: CONFIRMED (≥0.8), LIKELY (≥0.6), UNVERIFIED (≥0.4), STALE (<0.4)
+  - Multiplicative penalties: partial_data (-15%), stale_cache (-10%), parse_warnings (-5% each)
+  - Full `ConfidenceAssessment` with score, level, factors, component scores, and penalties
+  - `computeConfidence()` main engine, `calculateFreshnessScore()`, `interpretConfidenceScore()`
+
+- **Drift Detection System** (`src/core/drift/`):
+  - Schema snapshot inference from parsed results (field paths, types, ranges, patterns)
+  - Drift comparison: new_fields, missing_fields, type_change, value_range_change
+  - Severity classification: minor (log), major (review), breaking (fail acquisition)
+  - Recommendation engine: log_and_continue, flag_for_review, fail_acquisition
+  - `DriftDetector` interface with `detectDrift()` and `recordSnapshot()`
+  - `InMemoryDriftDetector` implementation (production: PostgreSQL-backed)
+  - Schema snapshot merging for multi-sample accuracy
+  - Breaking drift triggers SECURITY_SCHEMA_MISMATCH audit events
+
+- **Admin Dashboard Data Layer** (`src/admin/`):
+  - **Dashboard stats** (`dashboard.ts`):
+    - `getDashboardStats()`: total councils, active/degraded/disabled adapters, today's acquisitions, success rate, avg confidence, pending drift alerts, open security events
+    - `getAdapterStatusSummary()`: per-council grid with status, kill switch, 7d success rate, last success/failure, confidence
+    - `getRecentAcquisitions()`: last N acquisitions with council, timestamp, duration, success, confidence
+    - `getConfidenceDistribution()`: histogram of confirmed/likely/unverified/stale counts
+  - **Adapter health** (`adapter-health.ts`):
+    - `getAdapterHealthSummary()`: aggregated health across all councils with latency, drift alert counts
+    - `getAdapterHealthDetail()`: deep dive per adapter with recent attempts, drift events, capabilities
+  - **Evidence retention** (`retention.ts`):
+    - `getEvidenceRetentionStats()`: total files, size, expired count, retention window
+    - `getExpiredEvidence()`: query files older than retention window
+    - `markEvidenceForDeletion()`: soft-delete marking (actual purge is async)
+    - `purgeExpiredEvidence()`: async job to delete from blob storage + DB cleanup
+
+- **Admin API Routes** (extended `src/api/routes/admin.ts`):
+  - `GET /v1/admin/dashboard` → `DashboardStats`
+  - `GET /v1/admin/adapters/health` → `AdapterHealthSummary[]`
+  - `GET /v1/admin/drift-alerts` → Recent drift events with severity, affected fields
+  - `POST /v1/admin/drift-alerts/:alertId/acknowledge` → Mark drift alert as reviewed (audit logged)
+  - `GET /v1/admin/retention/stats` → Evidence retention statistics
+  - `POST /v1/admin/retention/purge-expired` → Queue async purge job (returns job ID)
+
+- **Database Migrations**:
+  - **004_schema_snapshots.sql**: `schema_snapshots` table with JSONB fields, version, active flag
+  - **005_drift_alerts.sql**: `drift_alerts` table with drift_type, severity, recommendation, affected_fields, acknowledged flag
+  - **006_confidence_log.sql**: `confidence_log` table for time-series confidence tracking per property/council with factors, component scores, penalties
+
+- **ADR-006: Confidence Scoring Design**:
+  - Decision: Weighted multi-factor numeric score over boolean flag or multi-dimensional score
+  - Rationale: Single authoritative score enables filtering, retention policies, and drift detection
+  - Security implication: Low-confidence data must never be presented as authoritative
+  - Weights chosen: method (35%), freshness (25%), validation (25%), health (15%)
+  - Named thresholds communicate reliability clearly to users
+
+**Patterns Established:**
+- Confidence scoring is **mandatory** for all `CollectionEventResult` objects
+- `ConfidenceFactors` breakdown provides transparency and audit trail
+- Drift detection runs on every acquisition; breaking drift fails the acquisition
+- Schema snapshots stored in PostgreSQL for persistence and historical analysis
+- Admin dashboard queries are **read-only** aggregations (no state mutations except acknowledge/purge)
+- Evidence purge is **async job** (BullMQ) not synchronous API call
+- All admin operations are **audit logged** (drift acknowledgment, purge initiation)
+
+**Security Considerations:**
+- Confidence scores prevent presenting unreliable data as authoritative
+- Drift alerts of severity 'breaking' trigger security events (SECURITY_SCHEMA_MISMATCH)
+- Evidence retention keyed to confidence: high confidence (90d), low confidence (180d for debugging)
+- Schema snapshots enable forensic analysis of upstream changes
+- Admin endpoints require `admin` role (enforced by auth middleware)
+- Purge operations logged and require explicit admin initiation
+
+**TODOs for Phase 4:**
+- Wire admin dashboard queries to PostgreSQL (currently stub implementations)
+- Implement BullMQ job queue for evidence purge
+- Add Redis caching for dashboard stats (5min TTL)
+- Create admin UI components consuming these endpoints
+- Implement drift alert notification system (email/Slack for breaking drift)
+- Add confidence score trending charts (track degradation over time)
+- Implement automatic re-acquisition when confidence drops below STALE threshold

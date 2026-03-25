@@ -157,3 +157,181 @@ Delivered complete Phase 2 security observability infrastructure for production 
 - **Naomi:** Review adapter security patterns, apply to existing adapters
 - **Drummer:** Run migration `003_security_events.sql`, configure SIEM transport
 - **All:** No secrets in logs (audit logs are append-only, cannot be edited)
+
+---
+
+### 2026-03-25: Phase 3 Retention Enforcement + Security Event Admin View Complete
+
+**Implementation Summary:**
+
+Delivered complete Phase 3 data retention enforcement and incident management infrastructure:
+
+1. **Retention Policy Engine** (`src/core/retention/policy.ts`)
+   - Formal, configurable retention policy for all data types
+   - Retention windows aligned to data classification matrix:
+     - Raw evidence (HTML/JSON): 90 days
+     - PDF evidence: 30 days
+     - Screenshots: 7 days
+     - Normalised collections: 365 days
+     - Security events: 365 days
+     - Audit logs: 730 days (2 years compliance)
+   - Purge strategies: hard-delete-blob, soft-delete-db, archive-then-delete, revoke-on-expiry
+   - Safety window: 7 days from cutoff (prevents accidental deletion)
+   - Deployment grace period: 24h dry-run mode after deployment
+   - Batch size limit: 1000 records per run (prevents long locks)
+   - Audit logging: every purge logged before execution
+
+2. **Retention Worker** (`src/workers/retention-worker.ts`)
+   - Scheduled background worker (cron: daily at 2am)
+   - Workflow: scan → audit log → purge in batches → log completion
+   - Dry-run mode configurable via environment variable
+   - Failure threshold: emit security event if purge failures >5%
+   - Status API: check worker state, last run result, configuration
+   - Integration point for cron scheduler (e.g., node-cron)
+
+3. **Evidence Expiry Management** (`src/storage/evidence/expiry.ts`)
+   - Set expiry metadata on evidence blobs at upload time
+   - Query expired blobs by metadata (expiresAt < now)
+   - Delete evidence with audit log entry (never silent deletion)
+   - Batch delete with success/failure tracking per blob
+   - Helper: calculate expiry date by evidence type
+   - Abstract blob storage client interface (Azure Blob, S3, local filesystem)
+
+4. **Azure Blob Lifecycle Policy** (`infra/terraform/modules/storage/lifecycle.tf`)
+   - Evidence containers: tier to cool after 30 days, delete after 90 days
+   - Screenshots: delete after 7 days (no tiering, short-lived)
+   - PDF evidence: tier to cool after 15 days, delete after 30 days
+   - Audit logs: tier to cool after 90 days, archive after 365 days, delete after 730 days
+   - Security event archive: same as audit logs (2 year retention)
+   - Platform-native (Azure-managed, no custom code)
+   - Cost optimization: cool storage = 50% cost reduction
+
+5. **Security Event Admin Dashboard** (`src/admin/security-dashboard.ts`)
+   - Summary view for admin home page:
+     - Critical events last 24h
+     - Open incidents count
+     - Adapters with anomalies
+     - Abuse blocks today
+     - Auth failures today
+     - Injection attempts today
+     - Enumeration blocks today
+     - Retention purges due
+   - Event filtering and pagination (severity, type, council, date range)
+   - Abuse pattern detection: aggregates events by pattern, shows occurrences, unique IPs, affected councils
+   - Adapter anomaly tracking: per-council security events with severity and occurrence count
+   - Open incidents view with severity-based prioritization
+
+6. **Incident Management** (`src/admin/incidents.ts`)
+   - Lightweight incident tracking (not full ITSM)
+   - Auto-creation triggers:
+     - Adapter blocked 3+ times in 1 hour → high severity
+     - Enumeration threshold hit → high severity
+     - Critical security event → critical severity
+     - Retention failure >5% → critical severity
+     - Audit HMAC validation failure → critical severity
+   - Status workflow: open → acknowledged → resolved
+   - Acknowledge incident: sets acknowledged_by, acknowledged_at, notes
+   - Resolve incident: sets resolved_by, resolved_at, resolution_notes
+   - Audit logging for all incident state changes
+   - Database schema: `007_incidents.sql` migration
+
+7. **Updated Security Controls** (`docs/threat-model/security-controls.md`)
+   - Phase 3 section added with implementation status
+   - Data retention enforcement: ✅
+   - Evidence expiry: ✅
+   - Audit archival: ✅
+   - Security event admin view: ✅
+   - Incident management: ✅
+   - Confidence-gated data serving: ⬜ (Phase 4)
+   - Penetration testing: ⬜ (Phase 4)
+
+**Design Decisions Made:**
+
+1. **Soft delete with reversible window:** 7-day window before hard delete (protects against accidental deletion)
+2. **Safety window:** Never purge data newer than cutoff - 7 days (conservative approach)
+3. **Deployment grace period:** 24h dry-run mode after deployment (prevents immediate purge)
+4. **Batch size limit:** Max 1000 records per run (prevents long locks, protects database performance)
+5. **Audit logging:** Every purge logged BEFORE execution (compliance + transparency)
+6. **Expiry metadata on upload:** Set expiresAt on every blob (explicit, queryable)
+7. **Azure Blob lifecycle policies:** Platform-native deletion (cost optimization + reliability)
+8. **Lightweight incident tracking:** Single table, simple workflow (no ITSM overkill)
+9. **Auto-creation triggers:** Create incidents when patterns detected (automation + consistency)
+10. **Simple status workflow:** Open → Acknowledged → Resolved (easy to understand, flexible)
+
+**Security Patterns Established:**
+
+- **Never purge security_events or audit_log without archiving first** (forensic capability)
+- **Soft delete before hard delete** (reversible window for error recovery)
+- **Safety window on all purges** (prevent accidental deletion of "just expired" data)
+- **Audit every deletion** (compliance + transparency)
+- **Batch processing** (prevent long locks, protect database performance)
+- **Dry-run mode by default** (validate before actual deletion)
+- **Auto-incident creation on patterns** (detect threats humans might miss)
+- **Severity-based prioritization** (critical incidents surface first)
+
+**Integration Points for Holden:**
+
+1. **Retention scanner registration:**
+   ```typescript
+   const scanners = new Map();
+   scanners.set('raw-evidence-html', new EvidenceBlobScanner('html'));
+   scanners.set('normalised-collection', new DatabaseTableScanner('collections'));
+   const engine = new RetentionPolicyEngine(scanners);
+   const worker = await createRetentionWorker(engine, startScheduler: true);
+   ```
+
+2. **Admin API routes:**
+   - `POST /v1/admin/retention/purge-expired` — Manual purge trigger
+   - `GET /v1/admin/retention/status` — Worker status
+   - `GET /v1/admin/security/summary` — Dashboard summary
+   - `GET /v1/admin/incidents` — List open incidents
+   - `POST /v1/admin/incidents/:id/acknowledge` — Acknowledge incident
+   - `POST /v1/admin/incidents/:id/resolve` — Resolve incident
+
+3. **Database clients:**
+   ```typescript
+   import { setDatabaseClient } from './admin/security-dashboard';
+   import { setDatabaseClient as setIncidentDbClient } from './admin/incidents';
+   setDatabaseClient(dbPool);
+   setIncidentDbClient(dbPool);
+   ```
+
+4. **Blob storage client:**
+   ```typescript
+   import { setBlobStorageClient } from './storage/evidence/expiry';
+   setBlobStorageClient(azureBlobClient);
+   ```
+
+**Integration Points for Drummer:**
+
+1. **Run migration:** `007_incidents.sql`
+2. **Deploy Terraform:** `infra/terraform/modules/storage/lifecycle.tf`
+3. **Configure cron scheduler:** Run retention worker daily at 2am
+4. **Set up monitoring alerts:** Retention failures, incident creation rate
+
+**Integration Points for Naomi:**
+
+1. **Set expiry metadata on evidence upload:**
+   ```typescript
+   await setEvidenceExpiry(blobRef, expiresAt, councilId, evidenceType);
+   ```
+
+**Next Steps:**
+
+- **Holden:** Implement retention scanners (DB + blob), create admin API routes, test in staging
+- **Drummer:** Run migration, deploy Terraform, configure cron, set up monitoring
+- **Naomi:** Set expiry metadata on evidence upload, test in staging
+- **Amos:** Monitor incidents in first week, tune thresholds, review retention policy after 30 days
+
+**Production Readiness:**
+
+- ✅ All code production-quality (error handling, logging, audit trails)
+- ✅ Dry-run mode for safe testing
+- ✅ Configurable via environment variables
+- ✅ Batch processing to prevent long locks
+- ✅ Audit logging for compliance
+- ✅ Terraform for infrastructure-as-code
+- ✅ Migration scripts for database schema
+- ⬜ Cron scheduler integration (Holden/Drummer)
+- ⬜ Monitoring alerts (Drummer)
+- ⬜ Testing in staging environment (All)

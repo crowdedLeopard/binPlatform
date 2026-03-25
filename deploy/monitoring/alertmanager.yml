@@ -1,0 +1,75 @@
+global:
+  resolve_timeout: 5m
+  # Email configuration (configure SMTP for production)
+  # smtp_smarthost: 'smtp.example.com:587'
+  # smtp_from: 'alertmanager@hampshire-bin-platform.example.com'
+  # smtp_auth_username: 'alertmanager'
+  # smtp_auth_password: '${SMTP_PASSWORD}'
+
+# Route configuration
+route:
+  group_by: ['alertname', 'cluster', 'service', 'council_id']
+  group_wait: 10s
+  group_interval: 10s
+  repeat_interval: 12h
+  receiver: 'default'
+  
+  # Routes for specific alert severity
+  routes:
+    # Critical alerts - immediate notification
+    - match:
+        severity: critical
+      receiver: 'critical'
+      group_wait: 0s
+      repeat_interval: 5m
+      continue: true
+    
+    # Warning alerts - aggregated notification
+    - match:
+        severity: warning
+      receiver: 'warning'
+      group_wait: 30s
+      repeat_interval: 3h
+
+# Inhibition rules - suppress lower-severity alerts when critical fires
+inhibit_rules:
+  # If adapter is unavailable, inhibit confidence degradation alerts
+  - source_match:
+      alertname: 'AdapterUnavailable'
+    target_match:
+      alertname: 'AdapterConfidenceDegraded'
+    equal: ['council_id']
+
+# Receivers configuration
+receivers:
+  # Default receiver (logs only for local dev)
+  - name: 'default'
+    # Add webhook or email configuration for production
+    # webhook_configs:
+    #   - url: 'http://localhost:5001/'
+  
+  # Critical alerts receiver
+  - name: 'critical'
+    # Email notification for critical alerts
+    # email_configs:
+    #   - to: 'ops-critical@example.com'
+    #     headers:
+    #       Subject: '[CRITICAL] {{ .GroupLabels.alertname }} - Hampshire Bin Platform'
+    #     html: '{{ template "email.default.html" . }}'
+    
+    # Webhook for Slack/Teams integration
+    # webhook_configs:
+    #   - url: '${SLACK_WEBHOOK_URL}'
+    #     send_resolved: true
+  
+  # Warning alerts receiver
+  - name: 'warning'
+    # Email notification for warnings
+    # email_configs:
+    #   - to: 'ops-warning@example.com'
+    #     headers:
+    #       Subject: '[WARNING] {{ .GroupLabels.alertname }} - Hampshire Bin Platform'
+
+# Templates for custom notification formatting
+# templates:
+#   - '/etc/alertmanager/templates/*.tmpl'

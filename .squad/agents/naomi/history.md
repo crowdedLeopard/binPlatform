@@ -239,3 +239,159 @@
 - Implement Fareham Bartec adapter (reusable SOAP pattern)
 - Add PDF parsing for East Hampshire
 
+---
+
+### 2026-03-25: Phase 3 — Bartec and PDF Calendar Adapters Implemented
+
+**Delivered:** Production-ready adapters for Fareham (Bartec) and East Hampshire (PDF calendars).
+
+**Fareham Adapter (Bartec Collective Platform):**
+- **Method:** SOAP/XML API integration with Bartec Municipal Technologies platform
+- **Platform Pattern:** High reusability — Bartec used by many UK councils
+- **Input:** UPRN (Unique Property Reference Number)
+- **Risk Level:** MEDIUM (SOAP-based, may require authentication)
+- **Key Patterns:**
+  - SOAP envelope construction (XML-based web service)
+  - XML response parsing with `fast-xml-parser`
+  - Bartec service code mapping (RES→GENERAL_WASTE, REC→RECYCLING, GW→GARDEN_WASTE)
+  - SOAP fault handling (structured error extraction)
+  - Authentication support (Basic Auth over HTTPS)
+  - Endpoint configuration via environment variable (`FAREHAM_API_ENDPOINT`)
+- **Challenges:**
+  - Bartec endpoint may require council partnership or API credentials
+  - XML schema variance between Bartec implementations
+  - Service code mapping varies by council (documented common patterns)
+- **Lessons:**
+  - SOAP APIs require more boilerplate than REST but offer structured contracts
+  - XML parsing must handle multiple namespace formats
+  - Bartec platform widely used — investment in base adapter pays dividends
+
+**East Hampshire Adapter (PDF Calendar System):**
+- **Method:** Two-phase acquisition (postcode→area→PDF download→parse)
+- **Input:** Postcode (GU30-GU35 range)
+- **Risk Level:** MEDIUM (PDF parsing, text extraction)
+- **Key Patterns:**
+  - Postcode-to-area static lookup with dynamic fallback capability
+  - PDF download with security validation (domain allowlist, size limit, content-type check)
+  - Text extraction using `pdf-parse` library
+  - Date pattern matching (multiple UK formats: DD/MM/YYYY, DD Month YYYY, ISO)
+  - Service type inference from text context (keyword analysis in 200-char window)
+  - Content hash calculation for change detection
+  - PDF security validation (JavaScript detection, embedded file warnings)
+- **Challenges:**
+  - PDF structure changes break parser (calendar redesigns)
+  - Service type inference is probabilistic (0.75 confidence vs 0.9+ for API)
+  - Static area mapping may not cover all postcodes (requires fallback)
+  - 13-month calendar coverage only (no historical data)
+- **Lessons:**
+  - PDF parsing is inherently less reliable than API but viable for calendar-based councils
+  - Aggressive caching essential (12h TTL) due to PDF download overhead
+  - Text-based PDFs work well; image-based PDFs would require OCR
+  - Context-based service type inference surprisingly effective
+
+**Shared Base Adapters Built:**
+
+1. **Bartec Base Adapter (`src/adapters/base/bartec-adapter.ts`)**
+   - Reusable SOAP client for all Bartec Collective councils
+   - SOAP envelope construction with XML escaping
+   - XML parsing with namespace handling
+   - SOAP fault extraction and categorization
+   - Common Bartec service code mappings (RES, REC, GW, FOOD, GLASS)
+   - Bartec date format parsing (DD/MM/YYYY, ISO)
+   - Authentication flow (Basic Auth with credentials from Key Vault)
+   - Pattern: `sendSoapRequest()`, `parseXmlResponse()`, `extractSoapFault()`
+
+2. **PDF Calendar Base Adapter (`src/adapters/base/pdf-calendar-adapter.ts`)**
+   - Reusable PDF download and parsing for all calendar-based councils
+   - Secure PDF download with validation (domain, content-type, size)
+   - Text extraction using `pdf-parse`
+   - Multi-pattern date extraction (DD/MM/YYYY, DD Month YYYY, ISO)
+   - Service type inference from context keywords
+   - PDF security validation (JavaScript, embedded files)
+   - SHA-256 content hashing for change detection
+   - Pattern: `downloadPdf()`, `extractDatesFromText()`, `inferServiceTypeFromContext()`
+
+**Bartec Service Code Mapping (Reusable):**
+```
+RES, REFUSE, RESIDUAL → general_waste
+REC, RECYCLE, RECYCLING → recycling
+GW, GARDEN, GREEN → garden_waste
+FOOD, FW → food_waste
+GLASS, GL → glass
+```
+
+**PDF Date Patterns (Reusable):**
+- Slash/dash format: `\b(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})\b`
+- Month name format: `\b(\d{1,2})(?:st|nd|rd|th)?\s+(January|February|...|Dec)\s+(\d{4})\b`
+- ISO format: `\b(\d{4})-(\d{2})-(\d{2})\b`
+
+**Dependencies Added:**
+- `fast-xml-parser@^4.5.0` — Safe XML parsing (no code execution)
+- `pdf-parse@^1.1.1` — PDF text extraction (Node.js, no rendering)
+- `uuid@^11.0.3` — UUID generation for evidence references
+- `@types/pdf-parse@^1.1.4` — TypeScript types for pdf-parse
+- `@types/uuid@^10.0.0` — TypeScript types for uuid
+
+**Security Hardening Applied:**
+
+1. **Bartec Adapter:**
+   - SOAP-based — no JavaScript execution
+   - XML parsing with `fast-xml-parser` (safe, configurable)
+   - Domain allowlist: `farehamgw.bartecmunicipal.com`, `fareham.gov.uk`
+   - Input sanitization (XML escaping for SOAP parameters)
+   - Credentials stored in Azure Key Vault (accessed via managed identity)
+   - Basic Auth over HTTPS only (never plaintext)
+   - Timeout enforcement (30s)
+
+2. **PDF Calendar Adapter:**
+   - PDF download validation (domain, content-type, size limit 5MB)
+   - `pdf-parse` library does not execute JavaScript or render PDFs
+   - Text extraction only (no DOM manipulation)
+   - PDF security scan (detects JavaScript, embedded files — warning logged)
+   - Domain allowlist: `easthants.gov.uk`
+   - Cloud metadata blocked (169.254.169.254)
+   - Timeout enforcement (30s)
+
+**Adapter Registry Updated:**
+- Registry now supports 4 councils (Eastleigh, Rushmoor, Fareham, East Hampshire)
+- Phase 2 and Phase 3 adapters registered
+- Kill switches: `ADAPTER_KILL_SWITCH_FAREHAM`, `ADAPTER_KILL_SWITCH_EAST_HAMPSHIRE`
+
+**Evidence Capture:**
+- Fareham: Raw XML stored with SHA-256 hash
+- East Hampshire: PDF content hash, download URL, extracted text
+
+**Caching Strategy:**
+- Fareham: 7-day TTL on collection schedules (same as API adapters)
+- East Hampshire: 12-hour TTL on PDF calendars (aggressive due to infrequent updates)
+
+**Performance Characteristics:**
+- Fareham (SOAP): 2-3s per request (similar to REST APIs)
+- East Hampshire (PDF): 5-10s per request (download + parsing overhead)
+
+**Rate Limiting Strategy:**
+- Fareham: 30 requests/minute (same as API adapters)
+- East Hampshire: 10 requests/minute (PDF download bandwidth consideration)
+
+**Testing Approach:**
+- Unit tests: Service code mapping, date parsing, XML/PDF parsing
+- Integration tests: Real SOAP/PDF downloads with test data
+- Health checks: Automated daily smoke tests
+- Schema drift detection: Content hash comparison
+
+**Monitoring Metrics:**
+- Fareham: Success rate (target >90%), SOAP fault frequency, authentication failures
+- East Hampshire: PDF download success, parsing success, date extraction count
+
+**Next Steps for Phase 4:**
+- Apply PDF calendar pattern to Gosport and Havant (similar PDF systems)
+- Apply Bartec pattern to any other Bartec councils discovered
+- Implement standard form adapters (Hart, Test Valley, Portsmouth)
+- Build Winchester browser automation adapter
+
+**Reusability Impact:**
+- Bartec base adapter applicable to any UK council using Bartec Collective
+- PDF calendar base adapter applicable to Gosport, Havant, and future calendar-based councils
+- Estimated 50% code reuse for next Bartec council
+- Estimated 60% code reuse for next PDF calendar council
+

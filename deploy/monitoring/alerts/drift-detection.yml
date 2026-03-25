@@ -1,0 +1,180 @@
+groups:
+  - name: adapter-drift
+    interval: 30s
+    rules:
+      # Breaking schema drift detected - immediate alert
+      - alert: AdapterSchemaBreakingDrift
+        expr: adapter_drift_breaking_total > 0
+        for: 0m
+        labels:
+          severity: critical
+          component: adapter
+          impact: data_loss
+        annotations:
+          summary: "Breaking schema drift detected for {{ $labels.council_id }}"
+          description: |
+            Adapter {{ $labels.council_id }} has detected breaking schema changes.
+            This indicates the council website structure has changed significantly.
+            
+            Current drift count: {{ $value }}
+            Method: {{ $labels.method }}
+            
+            Action required:
+            1. Review drift detection logs
+            2. Update adapter implementation
+            3. Test against new schema
+            4. Deploy updated adapter
+          runbook_url: "https://github.com/yourorg/hampshire-bin-platform/blob/main/docs/runbooks/drift-response.md"
+
+      # Adapter confidence score degraded - warning
+      - alert: AdapterConfidenceDegraded
+        expr: adapter_confidence_score < 0.5
+        for: 15m
+        labels:
+          severity: warning
+          component: adapter
+          impact: data_quality
+        annotations:
+          summary: "Adapter confidence degraded for {{ $labels.council_id }}"
+          description: |
+            Adapter {{ $labels.council_id }} confidence score has dropped below 50%.
+            Current score: {{ $value | humanizePercentage }}
+            
+            This may indicate:
+            - Minor website changes
+            - Intermittent parsing issues
+            - Data quality degradation
+            
+            Action: Monitor for improvement or investigate if persists >1h
+          runbook_url: "https://github.com/yourorg/hampshire-bin-platform/blob/main/docs/runbooks/drift-response.md"
+
+      # Adapter completely unavailable - critical
+      - alert: AdapterUnavailable
+        expr: adapter_health_status == 0
+        for: 5m
+        labels:
+          severity: critical
+          component: adapter
+          impact: service_down
+        annotations:
+          summary: "Adapter {{ $labels.council_id }} is unavailable"
+          description: |
+            Adapter {{ $labels.council_id }} health status is 0 (unavailable).
+            
+            This indicates:
+            - Council website down
+            - Network connectivity issues
+            - Adapter crash or failure
+            - Rate limiting or blocking
+            
+            Action required:
+            1. Check council website availability
+            2. Review adapter error logs
+            3. Verify network connectivity
+            4. Consider enabling kill switch if extended outage
+          runbook_url: "https://github.com/yourorg/hampshire-bin-platform/blob/main/docs/runbooks/synthetic-monitoring.md"
+
+      # High rate of abuse blocks - warning
+      - alert: HighAbuseRate
+        expr: rate(abuse_blocks_total[5m]) > 10
+        for: 2m
+        labels:
+          severity: warning
+          component: abuse-prevention
+          impact: service_degradation
+        annotations:
+          summary: "High rate of abuse blocks detected"
+          description: |
+            Abuse prevention system is blocking requests at {{ $value | humanize }} req/sec.
+            Block type: {{ $labels.type }}
+            
+            This may indicate:
+            - Automated scraping attempt
+            - API key leak
+            - DDoS attempt
+            - Misconfigured client
+            
+            Action: Review abuse logs and consider tightening rate limits
+          runbook_url: "https://github.com/yourorg/hampshire-bin-platform/blob/main/docs/runbooks/abuse-response.md"
+
+      # Synthetic check failure - critical
+      - alert: SyntheticCheckFailure
+        expr: synthetic_check_success == 0
+        for: 10m
+        labels:
+          severity: critical
+          component: synthetic-monitoring
+          impact: data_freshness
+        annotations:
+          summary: "Synthetic check failing for {{ $labels.council_id }}"
+          description: |
+            Synthetic monitoring check for {{ $labels.council_id }} has been failing for 10+ minutes.
+            Postcode tested: {{ $labels.postcode }}
+            
+            This indicates the adapter is not successfully acquiring data.
+            
+            Action required:
+            1. Review synthetic check logs
+            2. Test adapter manually
+            3. Check council website status
+            4. Enable kill switch if necessary
+          runbook_url: "https://github.com/yourorg/hampshire-bin-platform/blob/main/docs/runbooks/synthetic-monitoring.md"
+
+      # Acquisition latency high - warning
+      - alert: HighAcquisitionLatency
+        expr: histogram_quantile(0.95, rate(adapter_acquisition_duration_seconds_bucket[5m])) > 30
+        for: 10m
+        labels:
+          severity: warning
+          component: adapter
+          impact: performance
+        annotations:
+          summary: "High acquisition latency for {{ $labels.council_id }}"
+          description: |
+            95th percentile acquisition time for {{ $labels.council_id }} is {{ $value | humanizeDuration }}.
+            Method: {{ $labels.method }}
+            
+            Expected: < 30s
+            Current: {{ $value | humanizeDuration }}
+            
+            Action: Investigate council website performance or adapter efficiency
+          runbook_url: "https://github.com/yourorg/hampshire-bin-platform/blob/main/docs/runbooks/performance-troubleshooting.md"
+
+      # Redis unavailable - critical
+      - alert: RedisUnavailable
+        expr: redis_up == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: cache
+          impact: service_degradation
+        annotations:
+          summary: "Redis cache is unavailable"
+          description: |
+            Redis instance is down or unreachable.
+            
+            Impact:
+            - Rate limiting degraded
+            - Cache misses increase load
+            - Session state lost
+            
+            Action required: Restart Redis and investigate cause
+          runbook_url: "https://github.com/yourorg/hampshire-bin-platform/blob/main/docs/runbooks/redis-troubleshooting.md"
+
+      # Database unavailable - critical
+      - alert: DatabaseUnavailable
+        expr: pg_up == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: database
+          impact: service_down
+        annotations:
+          summary: "PostgreSQL database is unavailable"
+          description: |
+            PostgreSQL instance is down or unreachable.
+            
+            Impact: API cannot serve requests
+            
+            Action required: Immediate database recovery
+          runbook_url: "https://github.com/yourorg/hampshire-bin-platform/blob/main/docs/runbooks/database-troubleshooting.md"

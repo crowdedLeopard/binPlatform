@@ -49,6 +49,18 @@ export enum AuditEventType {
   SECURITY_UPSTREAM_ANOMALY = 'security.upstream_anomaly',
   SECURITY_SCHEMA_MISMATCH = 'security.schema_mismatch',
   SECURITY_INJECTION_ATTEMPT = 'security.injection_attempt',
+  
+  // Retention and data lifecycle (Phase 3)
+  DATA_PURGE_SCAN = 'retention.purge.scan',
+  DATA_PURGE_START = 'retention.purge.start',
+  DATA_PURGE_COMPLETE = 'retention.purge.complete',
+  EVIDENCE_DELETE = 'evidence.delete',
+  RETENTION_FAILURE = 'retention.failure',
+  
+  // Incident management (Phase 3)
+  INCIDENT_CREATED = 'incident.created',
+  INCIDENT_ACKNOWLEDGED = 'incident.acknowledged',
+  INCIDENT_RESOLVED = 'incident.resolved',
 }
 
 export type AuditSeverity = 'info' | 'warning' | 'critical';

@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soap:Body>
+    <Features_GetResponse xmlns="http://bartec-systems.com/Collective">
+      <Features_GetResult>
+        <Feature>
+          <FeatureId>12345</FeatureId>
+          <UPRN>100060321174</UPRN>
+          <ServiceCode>REFUSE</ServiceCode>
+          <ServiceName>Refuse Collection</ServiceName>
+          <NextCollectionDate>2026-03-30</NextCollectionDate>
+          <CollectionDay>Monday</CollectionDay>
+          <Frequency>Fortnightly</Frequency>
+          <ContainerType>240L Wheeled Bin</ContainerType>
+          <ContainerColour>Black</ContainerColour>
+          <IsActive>true</IsActive>
+        </Feature>
+        <Feature>
+          <FeatureId>12346</FeatureId>
+          <UPRN>100060321174</UPRN>
+          <ServiceCode>RECYCLE</ServiceCode>
+          <ServiceName>Recycling Collection</ServiceName>
+          <NextCollectionDate>2026-04-06</NextCollectionDate>
+          <CollectionDay>Monday</CollectionDay>
+          <Frequency>Fortnightly</Frequency>
+          <ContainerType>240L Wheeled Bin</ContainerType>
+          <ContainerColour>Green</ContainerColour>
+          <IsActive>true</IsActive>
+        </Feature>
+        <Feature>
+          <FeatureId>12347</FeatureId>
+          <UPRN>100060321174</UPRN>
+          <ServiceCode>GARDEN</ServiceCode>
+          <ServiceName>Garden Waste Collection</ServiceName>
+          <NextCollectionDate>2026-04-13</NextCollectionDate>
+          <CollectionDay>Monday</CollectionDay>
+          <Frequency>Fortnightly</Frequency>
+          <ContainerType>240L Wheeled Bin</ContainerType>
+          <ContainerColour>Brown</ContainerColour>
+          <IsActive>true</IsActive>
+          <RequiresSubscription>true</RequiresSubscription>
+        </Feature>
+      </Features_GetResult>
+    </Features_GetResponse>
+  </soap:Body>
+</soap:Envelope>

@@ -455,3 +455,91 @@ jobs:
           name: dist
           path: dist/
           retention-days: 7
+
+  synthetic-check:
+    name: Synthetic Adapter Checks
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' && github.base_ref == 'main'
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: binday_test
+          POSTGRES_USER: binday_test
+          POSTGRES_PASSWORD: test_password
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+      
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Build application
+        run: npm run build
+      
+      - name: Start API in background
+        run: |
+          nohup node dist/api/server.js > api.log 2>&1 &
+          echo $! > api.pid
+        env:
+          PORT: 3000
+          NODE_ENV: test
+          DATABASE_URL: postgresql://binday_test:test_password@localhost:5432/binday_test
+          REDIS_URL: redis://localhost:6379
+          LOG_LEVEL: warn
+      
+      - name: Wait for API to be ready
+        run: |
+          for i in {1..30}; do
+            if curl -sf http://localhost:3000/health/ready > /dev/null; then
+              echo "API is ready"
+              exit 0
+            fi
+            echo "Waiting for API... ($i/30)"
+            sleep 2
+          done
+          echo "API failed to become ready"
+          cat api.log
+          exit 1
+      
+      - name: Run synthetic adapter health checks
+        run: npm run test:synthetic
+        env:
+          API_URL: http://localhost:3000
+      
+      - name: Upload API logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v3
+        with:
+          name: api-logs
+          path: api.log
+      
+      - name: Teardown
+        if: always()
+        run: |
+          if [ -f api.pid ]; then
+            kill $(cat api.pid) || true
+          fi

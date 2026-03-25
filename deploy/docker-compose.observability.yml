@@ -1,0 +1,71 @@
+version: '3.9'
+
+# Optional observability stack for local development
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.observability.yml up
+
+services:
+  prometheus:
+    image: prom/prometheus:v2.48.1
+    container_name: binday-prometheus
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/alerts/drift-detection.yml:/etc/prometheus/rules/drift-detection.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.enable-lifecycle'
+    ports:
+      - "9090:9090"
+    networks:
+      - app-network
+    restart: unless-stopped
+    
+  grafana:
+    image: grafana/grafana:10.2.3
+    container_name: binday-grafana
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=http://localhost:3001
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    networks:
+      - app-network
+    restart: unless-stopped
+      
+  alertmanager:
+    image: prom/alertmanager:v0.26.0
+    container_name: binday-alertmanager
+    volumes:
+      - ./monitoring/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+    ports:
+      - "9093:9093"
+    networks:
+      - app-network
+    restart: unless-stopped
+
+networks:
+  app-network:
+    external: true
+    name: deploy_app-network
+
+volumes:
+  prometheus_data:
+  grafana_data:
+  alertmanager_data:

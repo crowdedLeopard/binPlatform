@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+  <soap:Body>
+    <soap:Fault>
+      <faultcode>soap:Server</faultcode>
+      <faultstring>Internal Server Error</faultstring>
+      <detail>
+        <error xmlns="http://bartec-systems.com/Collective">
+          <message>Unable to process request</message>
+          <code>BARTEC_500</code>
+        </error>
+      </detail>
+    </soap:Fault>
+  </soap:Body>
+</soap:Envelope>

@@ -10,6 +10,8 @@
 import type { CouncilAdapter } from './base/adapter.interface.js';
 import { EastleighAdapter } from './eastleigh/index.js';
 import { RushmoorAdapter } from './rushmoor/index.js';
+import { FarehamAdapter } from './fareham/index.js';
+import { EastHampshireAdapter } from './east-hampshire/index.js';
 
 export class AdapterDisabledError extends Error {
   constructor(councilId: string) {
@@ -91,13 +93,17 @@ export const adapterRegistry = new AdapterRegistry();
 export function initializeAdapters(): void {
   console.log('[REGISTRY] Initializing adapters...');
   
-  // Register Phase 1 adapters
+  // Register Phase 2 adapters (Eastleigh, Rushmoor)
   adapterRegistry.register(new EastleighAdapter());
   adapterRegistry.register(new RushmoorAdapter());
   
-  // TODO: Register Phase 2+ adapters as implemented
-  // adapterRegistry.register(new FarehamAdapter());
-  // adapterRegistry.register(new EastHampshireAdapter());
+  // Register Phase 3 adapters (Fareham, East Hampshire)
+  adapterRegistry.register(new FarehamAdapter());
+  adapterRegistry.register(new EastHampshireAdapter());
+  
+  // TODO: Register Phase 4+ adapters as implemented
+  // adapterRegistry.register(new HartAdapter());
+  // adapterRegistry.register(new GosportAdapter());
   // ... etc
   
   const registeredCount = adapterRegistry.getAll().length;

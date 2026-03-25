@@ -41,6 +41,296 @@
 
 ---
 
+## Phase 3 Decisions
+
+### Adapter Implementation (Naomi)
+
+**Decision 1: Bartec Base Adapter Pattern**
+- **Status:** Implemented
+- **Scope:** Fareham Borough Council (Bartec Collective SOAP/XML API)
+- **Pattern:** `BartecBaseAdapter` abstract base class with Fareham-specific extension
+- **Components:** SOAP envelope construction, XML parsing (`fast-xml-parser`), service code mappings, fault handling
+- **Rationale:** Enables 50% code reduction for future Bartec councils, centralizes SOAP/XML logic
+- **Risk:** If Bartec varies significantly between councils, base may need abstraction layers
+- **Strategic Value:** High reusability across UK council estate
+
+**Decision 2: PDF Calendar Base Adapter Pattern**
+- **Status:** Implemented
+- **Scope:** East Hampshire District Council (PDF calendar system)
+- **Pattern:** `PdfCalendarBaseAdapter` abstract base class with EH-specific mappings
+- **Components:** Secure PDF download, text extraction (`pdf-parse`), multi-format date matching, service type inference
+- **Rationale:** Enables 60% code reduction for Gosport and Havant (also use PDF calendars)
+- **Security:** Centralized PDF validation (domain, size, content-type)
+- **Limitation:** Requires text-based PDFs; OCR deferred for future
+
+**Decision 3: Bartec Service Code Mapping (Fuzzy)**
+- **Strategy:** Fuzzy mapping with warnings for unknown codes
+- **Mapping:** RES/REFUSE/RESIDUAL → general_waste, REC/RECYCLE → recycling, GW/GARDEN → garden_waste, etc.
+- **Handling:** Unknown codes map to `other` and log warning (early alert for schema drift)
+- **Rationale:** Handles variance between Bartec implementations, graceful degradation
+
+**Decision 4: PDF Service Type Inference from Context**
+- **Method:** Keyword-based context analysis (200 chars before/after each date)
+- **Confidence:** 0.75 (vs 0.9+ for API data) — reflects uncertainty in PDF parsing
+- **Extensibility:** Can add ML classifier later if needed
+- **Risk:** Calendar redesigns may break keyword matching
+
+**Decision 5: XML Parsing Library (`fast-xml-parser`)**
+- **Choice:** `fast-xml-parser` over alternatives (DOM, xml2js, manual regex)
+- **Security:** No script execution risk, namespace handling, configurable attributes
+- **Performance:** Fast parsing (name accurate), good TypeScript support
+- **Trade-off:** Requires schema knowledge (less self-documenting than JSON)
+
+**Decision 6: PDF Parsing Library (`pdf-parse`)**
+- **Choice:** `pdf-parse` for server-side text-only extraction
+- **Security:** No rendering engine, no JavaScript execution in PDFs
+- **Limitation:** Text-only (OCR deferred for image-based PDFs)
+- **Assumption:** East Hampshire PDFs remain text-based
+
+**Decision 7: Aggressive PDF Caching (12-Hour TTL)**
+- **TTL:** 12 hours for PDF calendars (vs 7 days for collection schedules)
+- **Rationale:** PDFs 1-5MB, change infrequently (annual/semi-annual); 12h ensures twice-daily checks
+- **Trade-off:** Users see stale data for up to 12h if calendar updated mid-period
+- **Alternative:** ETags/If-Modified-Since deferred
+
+**Decision 8: Postcode-to-Area Static Lookup with Dynamic Fallback**
+- **Primary:** Static lookup table for common postcodes (GU30-GU35)
+- **Fallback:** Placeholder for dynamic browser automation (not yet implemented)
+- **Coverage:** Static table covers 90%+ of cases
+- **Rationale:** Pragmatic for common postcodes; extensible for edge cases
+
+---
+
+### Confidence Scoring + Admin Dashboard (Holden)
+
+**Decision 1: Weighted Multi-Factor Confidence Score (0.0–1.0)**
+- **Formula:** `confidence = (method_score × 0.35) + (freshness_score × 0.25) + (validation_score × 0.25) + (health_score × 0.15)`
+- **Penalties:** Partial data (×0.85), stale cache (×0.90), parse warnings (×(1.0 - 0.05 × warning_count))
+
+**Method Score Weights:**
+- API: 1.0 (structured, stable)
+- Hidden JSON: 0.95 (discovered endpoint)
+- HTML Form: 0.85 (form submit, fragile)
+- Browser Automation: 0.75 (high fragility)
+- PDF Calendar: 0.7 (OCR/parse, error-prone)
+- Unknown: 0.3 (unvalidated)
+
+**Freshness Decay:**
+- API/HTML/Browser: Fresh 4h, then -2.5%/hr decay, min 0.2
+- PDF/Calendar: Fresh 24h, then -1.5%/hr decay, min 0.2
+- Rationale: Calendars change less frequently than real-time APIs
+
+**Named Thresholds:**
+- CONFIRMED (≥0.8): Display as "confirmed"
+- LIKELY (≥0.6): Display as "likely"
+- UNVERIFIED (≥0.4): Display as "unverified"
+- STALE (<0.4): Trigger re-acquisition
+
+**Decision 2: Schema Snapshot Inference for Drift Detection**
+- **Capture:** For every successful acquisition, store schema snapshot with:
+  - Field paths (e.g., `events[].collectionDate`)
+  - Detected types, required flag, array flag, sample values
+  - Numeric ranges, string patterns
+- **Versioning:** Each snapshot tracked with version number
+
+**Drift Classification:**
+- **New fields:** Log and continue
+- **Missing fields:** Flag for review, notify admin
+- **Type changes / missing required fields:** Fail acquisition, log security event (SECURITY_SCHEMA_MISMATCH)
+
+**Drift Response:**
+1. Fail acquisition immediately
+2. Log `SECURITY_SCHEMA_MISMATCH` security event
+3. Create drift alert with recommendation
+4. Admin reviews, acknowledges after investigation
+5. If fixed: schema snapshot updated, acquisitions resume
+6. If broken: kill switch activated
+
+**Decision 3: Admin Dashboard Data Layer**
+- **Dashboard Stats:** Total councils, adapter health, acquisition success rate, avg confidence, pending drift alerts, open security events (5min TTL cache)
+- **Adapter Health:** Per-adapter roll-up with kill switch state, 7d success rate, latency, confidence, drift alerts
+- **Confidence Distribution:** Histogram (confirmed/likely/unverified/stale counts)
+- **Evidence Retention:** Total size, expired files, last purge timestamp
+
+**Decision 4: Evidence Retention Policy**
+- **High-confidence:** 90d retention
+- **Low-confidence:** 180d retention (for debugging)
+- **Async purge:** BullMQ job runs weekly
+- **Admin capability:** Manual purge trigger
+
+---
+
+### Testing Strategy (Bobbie)
+
+**TP-001: XML/SOAP Test Fixtures with Raw Imports**
+- **Pattern:** Use `?raw` suffix to preserve exact XML structure, whitespace, encoding
+- **Benefit:** Realistic SOAP fault testing, validates parser behavior
+- **Impact:** Vite/TypeScript must support `?raw` imports, more verbose fixtures
+
+**TP-002: PDF Adapter Testing with Mock Buffers**
+- **Pattern:** Use `Buffer.from()` for mock PDF data, no actual PDF files
+- **Rationale:** Real PDFs bloat test fixtures (>100KB each); adapter tests focus on validation logic, not PDF library
+- **Benefit:** Fast test execution, no file I/O
+
+**TP-003: Confidence Score Determinism**
+- **Requirement:** Same inputs must always produce same output
+- **Enforcement:** No randomness, no `Date.now()` in calculation
+- **Benefit:** Reproducible scores, reliable threshold-based decisions
+
+**TP-004: Drift Detection Audit Logging**
+- **Requirement:** All drift events (minor/major/breaking) logged to audit trail
+- **Rationale:** Historical drift patterns inform maintenance priorities, compliance requirement
+- **Volume:** ~5-10 drift events per adapter per month expected
+
+**TP-005: Synthetic Monitor Safety Isolation**
+- **Pattern:** Synthetic checks run in isolated worker with separate rate limit quota
+- **Rationale:** Failures must not block production user requests, upstream rate limits protected
+- **Implementation:** Separate BullMQ queue, separate Redis rate limit keys, `isSynthetic: true` flag
+
+**Synthetic Check Frequencies:**
+- Liveness: 5 minutes (MTTD <5min)
+- Freshness: 30 minutes
+- Canary: 2 hours
+- Confidence Trend: 1 hour
+
+**Alert Escalation:**
+1. Single failure: Log only
+2. 2 consecutive failures: Increment counter, log warning
+3. 3 consecutive failures: Mark degraded, notify on-call
+4. Upstream unreachable: Immediate notification
+
+**Test Postcode Selection:**
+- Use actual postcodes (not synthetic)
+- Avoid residential properties (use council offices, public buildings)
+- Rotate quarterly (prevent synthetic detection)
+
+---
+
+### Retention Policy & Incident Management (Amos)
+
+**Decision 1: Retention Windows by Data Type**
+- raw-evidence-html: 90 days, hard-delete-blob
+- raw-evidence-json: 90 days, hard-delete-blob
+- raw-evidence-pdf: 30 days, hard-delete-blob
+- raw-evidence-screenshot: 7 days, hard-delete-blob
+- normalised-collection: 365 days, soft-delete-db
+- acquisition-attempt: 90 days, soft-delete-db
+- security-event: 365 days, archive-then-delete
+- audit-log: 730 days, archive-then-delete
+- user-input-log: 30 days, hard-delete-db
+- api-key: null (active), 90 days (revoked), revoke-on-expiry
+
+**Trade-offs:**
+- Storage cost vs. debug capability: 90 days for evidence
+- Privacy vs. forensics: 365 days for security events
+- Compliance vs. cost: 730 days for audit (compliance wins)
+
+**Decision 2: Soft Delete with 7-Day Reversible Window**
+- **Process:** Mark as deleted but don't physically remove
+- **Reversal:** Records can be recovered within 7 days
+- **Rationale:** Protects against accidental deletion, industry standard pattern
+- **Implementation:** UPDATE with `deleted_at`, then hard DELETE after 7 days
+
+**Decision 3: Safety Window (7 Days from Cutoff Date)**
+- **Rule:** Never purge data newer than `cutoff_date - 7 days`
+- **Rationale:** Prevents accidental deletion just after expiry, protects against clock skew
+- **Example:** 90-day retention → actual cutoff 97 days ago
+
+**Decision 4: Deployment Grace Period (24-Hour Dry-Run)**
+- **Default:** Dry-run mode enabled for first 24 hours post-deployment
+- **Rationale:** Prevents immediate purge after misconfiguration
+- **Override:** Admin can force purge with `force: true` flag
+
+**Decision 5: Batch Size Limit (1000 Records per Run)**
+- **Rationale:** Prevents long database locks, allows concurrent operations
+- **Trade-off:** Multiple runs OK (job runs daily)
+
+**Decision 6: Evidence Expiry Metadata in Blob Storage**
+- **Pattern:** Set `expiresAt` metadata on upload
+- **Benefit:** Queryable, enables lifecycle policies, platform-agnostic
+- **Metadata:** expiresAt, councilId, evidenceType, uploadedAt
+
+**Decision 7: Azure Blob Lifecycle Policy**
+- **Evidence:** Tier to cool after 30 days, delete after 90 days
+- **Screenshots:** Delete after 7 days (no tiering)
+- **Audit logs:** Tier cool 90d, archive 365d, delete 730d
+- **Benefit:** Cost optimization + automatic deletion (Microsoft-managed)
+
+**Decision 8: Lightweight Incident Tracking**
+- **Scope:** Security incidents only (not general IT)
+- **Schema:** Single table with id, type, severity, status, trigger_event_id
+- **Status Workflow:** Open → Acknowledged → Resolved
+- **Rationale:** Simplicity, speed, flexibility
+
+**Auto-Creation Triggers:**
+1. Adapter blocked 3+ times in 1h → `adapter_blocked_repeated` (high)
+2. Enumeration threshold hit → `enumeration_threshold_hit` (high)
+3. Critical security event → `critical_security_event` (critical)
+4. Retention purge failure >5% → `retention_failure` (critical)
+5. Audit HMAC failure → `audit_hmac_failure` (critical)
+
+---
+
+### Monitoring Stack & Alerting (Drummer)
+
+**Decision 1: Separate Monitor Container (Not Sidecar)**
+- **Architecture:** Dedicated `deploy/Dockerfile.monitor` for synthetic checks
+- **Isolation:** Monitor failures don't affect API/worker
+- **Scalability:** Can scale independently, lower resource needs
+- **Network:** Outbound-only, no exposed ports (smaller attack surface)
+
+**Decision 2: Process-Based Health Check**
+- **Method:** `pgrep -f "synthetic-monitor"` instead of HTTP endpoint
+- **Rationale:** Monitor is outbound-only; process check sufficient
+- **Benefit:** No HTTP server overhead
+
+**Decision 3: Separate Observability Compose File**
+- **File:** `docker-compose.observability.yml` separate from main compose
+- **Opt-in:** Developers can run app without full stack
+- **Benefit:** Lightweight local dev by default, flexibility for production (Azure Monitor)
+- **Usage:** `docker-compose -f docker-compose.yml -f docker-compose.observability.yml up`
+
+**Decision 4: Metrics Endpoint (Internal Network Only)**
+- **Access:** IP-restricted to internal subnet, NEVER public
+- **Security:** Metrics may leak system internals
+- **Implementation:** API route with allowlist middleware, Azure Firewall rules
+- **Never expose:** Software versions, internal IPs, connection strings, secrets, detailed errors
+
+**Decision 5: Prometheus + Azure Monitor (Both)**
+- **Local Dev:** Prometheus for instant feedback
+- **Production:** Azure Monitor for enterprise features (long-term storage, alerting, integration)
+- **Metrics:** Same Prometheus client library, different backends
+- **Cost:** Free local, billed by ingestion on Azure
+
+**Decision 6: Alert Severity with Grace Periods**
+- **Critical:** 0-5 min grace, 5 min repeat (breaking drift, adapter unavailable)
+- **Warning:** 15-30 min grace, 3 hour repeat (confidence degraded, high latency)
+- **Inhibition:** Adapter unavailable → suppress confidence alerts; council down → suppress all adapter alerts
+
+**Decision 7: Synthetic Check Canary Postcodes**
+- **Pattern:** One representative postcode per council, environment-configured
+- **Selection:** Real, stable addresses (not test data); exercise typical paths
+- **Environment:** Different canaries for dev/staging/prod
+- **Management:** Version-controlled in environment config
+
+**Decision 8: Breaking Drift Response SLA (15 Minutes)**
+- **Procedure:** Enable kill switch within 15 minutes of detection
+- **Phases:** 0-15m (kill switch), 15-30m (assess), 30-90m (RCA), 1-24h (fix)
+- **Rationale:** Prevent bad data, show "unavailable" instead of wrong dates
+- **Escalation:** After 24h → incident manager
+
+**Decision 9: Terraform Monitoring Module**
+- **Structure:** Separate `infra/terraform/modules/monitoring` module
+- **Benefit:** Reusable, testable independently, clear boundaries
+- **Outputs:** Instrumentation keys (from Key Vault), workspace IDs, action group ID
+
+**Decision 10: Runbook Documentation**
+- **Scope:** Two runbooks (synthetic-monitoring, drift-response)
+- **Structure:** Overview, step-by-step, decision trees, escalation
+- **Maintenance:** Quarterly review, update after incidents, test in game days
+
+---
+
 ### Security Decisions (Amos) — MANDATORY, BLOCKING
 
 **SD-01: No Secrets in Code, Config, or Git**

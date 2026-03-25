@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+  <soap:Body>
+    <Features_GetResponse xmlns="http://bartec-systems.com/Collective">
+      <Features_GetResult>
+        <!-- No features returned for this UPRN -->
+      </Features_GetResult>
+    </Features_GetResponse>
+  </soap:Body>
+</soap:Envelope>
