@@ -7,9 +7,11 @@ import { logger } from '../observability/logger.js';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import { createHash } from 'crypto';
 import { getAdapter, isCouncilSupported, initializeAdapters } from '../adapters/registry.js';
 import type { PropertyLookupInput, PropertyIdentity, DateRange } from '../adapters/base/adapter.interface.js';
 import { v4 as uuidv4 } from 'uuid';
+import { resolvePostcodeToUprn } from '../services/uprn-resolution.js';
 
 // Initialize adapters at module load
 initializeAdapters();
@@ -150,10 +152,11 @@ export async function buildServer() {
       const isKilled = process.env[killSwitchKey] === 'true';
       const isActive = !isKilled;
       const statusHtml = isActive ? '<span class="status-active"></span>Active' : '<span class="status-inactive"></span>Disabled';
+      const implementation = c.adapter_status === 'implemented' ? 'Implemented' : (c.adapter_status === 'stub' ? 'Stub' : 'Not Implemented');
       return `
           <tr>
             <td><strong>${c.council_name}</strong><br><small style="color: #94a3b8;">${c.council_id}</small></td>
-            <td>${c.adapter_status || 'unknown'}</td>
+            <td>${implementation}</td>
             <td>${Math.round((c.confidence_score || 0) * 100)}%</td>
             <td>${statusHtml}</td>
           </tr>`;
@@ -359,12 +362,34 @@ export async function buildServer() {
     </div>
 
     <div class="section">
+      <h2>Drift Status</h2>
+      <div class="info-grid">
+        <div class="info-item">
+          <div class="info-label">Last Check</div>
+          <div class="info-value">${lastDriftCheck ? new Date(lastDriftCheck.checked_at).toLocaleString() : 'Never'}</div>
+        </div>
+        <div class="info-item">
+          <div class="info-label">Adapters OK</div>
+          <div class="info-value">${lastDriftCheck ? `${lastDriftCheck.ok} / ${lastDriftCheck.total}` : 'N/A'}</div>
+        </div>
+        <div class="info-item">
+          <div class="info-label">Drifted</div>
+          <div class="info-value" style="color: ${lastDriftCheck && lastDriftCheck.drifted > 0 ? '#ef4444' : '#10b981'};">${lastDriftCheck ? lastDriftCheck.drifted : 'N/A'}</div>
+        </div>
+        <div class="info-item">
+          <div class="info-label">Unreachable</div>
+          <div class="info-value" style="color: ${lastDriftCheck && lastDriftCheck.unreachable > 0 ? '#f59e0b' : '#10b981'};">${lastDriftCheck ? lastDriftCheck.unreachable : 'N/A'}</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
       <h2>Hampshire Councils (${councilRegistry.length})</h2>
       <table>
         <thead>
           <tr>
             <th>Council</th>
-            <th>Adapter Status</th>
+            <th>Implementation</th>
             <th>Confidence</th>
             <th>Active</th>
           </tr>
@@ -450,7 +475,133 @@ export async function buildServer() {
     };
   });
 
-  // TODO: Register API routes
+  // API Routes
+  // v1/postcodes/:postcode/addresses - Resolve postcode to addresses
+  server.get('/v1/postcodes/:postcode/addresses', async (request: any, reply: any) => {
+    const { postcode } = request.params as { postcode: string };
+    
+    // Validate UK postcode format
+    if (!/^[A-Z]{1,2}[0-9][0-9A-Z]?\s?[0-9][A-Z]{2}$/i.test(postcode)) {
+      return reply.status(400).send({
+        statusCode: 400,
+        error: 'Bad Request',
+        message: 'Invalid UK postcode format',
+        postcode
+      });
+    }
+    
+    try {
+      // Resolve postcode to UPRNs
+      const addresses = await resolvePostcodeToUprn(postcode);
+      
+      if (addresses.length === 0) {
+        return reply.status(404).send({
+          statusCode: 404,
+          error: 'Not Found',
+          message: `No addresses found for postcode '${postcode}'. Try SO50 5PN (Eastleigh) or PO16 7XX (Fareham) for demo.`,
+          postcode
+        });
+      }
+      
+      // Return addresses in standardized format
+      return {
+        postcode: postcode.toUpperCase().trim(),
+        addresses: addresses.map(addr => ({
+          id: `${addr.councilId}:${addr.uprn}`,
+          address: addr.address,
+          uprn: addr.uprn,
+          councilId: addr.councilId,
+          confidence: addr.confidence
+        })),
+        count: addresses.length,
+        timestamp: new Date().toISOString()
+      };
+    } catch (error) {
+      request.log.error({ err: error, postcode }, 'Failed to resolve postcode');
+      return reply.status(500).send({
+        statusCode: 500,
+        error: 'Internal Server Error',
+        message: 'Failed to resolve postcode'
+      });
+    }
+  });
+  
+  // v1/properties/:propertyId/collections - Get bin collection schedule
+  server.get('/v1/properties/:propertyId/collections', async (request: any, reply: any) => {
+    const { propertyId } = request.params as { propertyId: string };
+    
+    // Property ID format: councilId:uprn
+    const [councilId, uprn] = propertyId.split(':');
+    
+    if (!councilId || !uprn) {
+      return reply.status(400).send({
+        statusCode: 400,
+        error: 'Bad Request',
+        message: 'Invalid property ID format. Expected format: councilId:uprn (e.g., eastleigh:100060321174)',
+        propertyId
+      });
+    }
+    
+    // Check if council is supported
+    if (!isCouncilSupported(councilId)) {
+      return reply.status(404).send({
+        statusCode: 404,
+        error: 'Not Found',
+        message: `Council '${councilId}' not found or disabled`,
+        councilId
+      });
+    }
+    
+    try {
+      // Get adapter for council
+      const adapter = getAdapter(councilId);
+      
+      // Get collection events
+      const result = await adapter.getCollectionEvents({ 
+        councilLocalId: uprn,
+        uprn: uprn,
+        address: '',
+        postcode: '',
+        correlationId: request.id || 'unknown'
+      });
+      
+      if (!result.success) {
+        return reply.status(503).send({
+          statusCode: 503,
+          error: 'Service Unavailable',
+          message: result.errorMessage || 'Failed to fetch collection data',
+          failureCategory: result.failureCategory
+        });
+      }
+      
+      // Return collection events
+      return {
+        propertyId,
+        councilId,
+        uprn,
+        collections: result.data?.map(event => ({
+          date: event.collectionDate,
+          serviceType: event.serviceType,
+          serviceId: event.serviceId,
+          isConfirmed: event.isConfirmed,
+          isRescheduled: event.isRescheduled,
+          notes: event.notes
+        })) || [],
+        count: result.data?.length || 0,
+        confidence: result.confidence,
+        timestamp: new Date().toISOString(),
+        sourceEvidenceRef: result.sourceEvidenceRef
+      };
+    } catch (error) {
+      request.log.error({ err: error, propertyId, councilId, uprn }, 'Failed to fetch collections');
+      return reply.status(500).send({
+        statusCode: 500,
+        error: 'Internal Server Error',
+        message: error instanceof Error ? error.message : 'Failed to fetch collection data'
+      });
+    }
+  });
+  
   // Inline v1 routes — council registry served from data/council-registry.json
   server.get('/v1/councils', async () => ({
     councils: councilRegistry.map(c => ({
@@ -492,6 +643,315 @@ export async function buildServer() {
       upstream_risk_level: council.upstream_risk_level,
       checked_at: new Date().toISOString()
     };
+  });
+
+  // =============================================================================
+  // ADMIN ENDPOINTS
+  // =============================================================================
+
+  // Admin authentication middleware
+  const adminAuth = (request: any, reply: any, done: () => void) => {
+    const key = request.headers['x-admin-key'];
+    if (!key || key !== process.env.BOOTSTRAP_ADMIN_KEY) {
+      reply.status(401).send({ error: 'unauthorized' });
+      return;
+    }
+    done();
+  };
+
+  // Helper: Get adapter status for a council
+  const getAdapterStatus = (councilId: string) => {
+    const council = councilRegistry.find(c => c.council_id === councilId);
+    if (!council) return null;
+
+    const killSwitchKey = `ADAPTER_KILL_SWITCH_${councilId.toUpperCase().replace(/-/g, '_')}`;
+    const envKillSwitch = process.env[killSwitchKey] === 'true';
+    const runtimeDisabled = disabledAdapters.has(councilId);
+
+    return {
+      council_id: councilId,
+      council_name: council.council_name,
+      status: council.adapter_status || 'stub',
+      kill_switch_active: envKillSwitch || runtimeDisabled,
+      last_health_check: null,
+      confidence_score: council.confidence_score || 0,
+      implementation: council.adapter_status === 'implemented' ? `${councilId.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join('')}Adapter` : 'N/A',
+      notes: runtimeDisabled ? disabledAdapters.get(councilId)?.reason || '' : ''
+    };
+  };
+
+  // Helper: Hash object for drift detection
+  const hashObject = (obj: any): string => {
+    return createHash('sha256').update(JSON.stringify(obj)).digest('hex');
+  };
+
+  // 1. GET /v1/admin/adapters - List all adapter statuses
+  server.get('/v1/admin/adapters', { preHandler: adminAuth }, async () => {
+    const adapters = councilRegistry.map(c => getAdapterStatus(c.council_id)).filter(Boolean);
+    return { adapters };
+  });
+
+  // 2. GET /v1/admin/adapters/:councilId/health - Deep health check
+  server.get('/v1/admin/adapters/:councilId/health', { preHandler: adminAuth }, async (request: any, reply: any) => {
+    const { councilId } = request.params;
+    
+    if (!isCouncilSupported(councilId)) {
+      reply.code(404).send({ error: 'Council not found or adapter not registered' });
+      return;
+    }
+
+    try {
+      const adapter = getAdapter(councilId);
+      const health = await adapter.verifyHealth();
+      return {
+        council_id: councilId,
+        health,
+        checked_at: new Date().toISOString()
+      };
+    } catch (error: any) {
+      reply.code(500).send({ 
+        error: 'Health check failed', 
+        message: error.message,
+        council_id: councilId
+      });
+    }
+  });
+
+  // 3. POST /v1/admin/adapters/:councilId/drift-check - Check for schema drift
+  server.post('/v1/admin/adapters/:councilId/drift-check', { preHandler: adminAuth }, async (request: any, reply: any) => {
+    const { councilId } = request.params;
+    
+    const testPostcode = testPostcodes[councilId];
+    if (!testPostcode) {
+      reply.code(400).send({ error: 'No test postcode configured for this council' });
+      return;
+    }
+
+    if (!isCouncilSupported(councilId)) {
+      reply.code(404).send({ error: 'Council not found or adapter not registered' });
+      return;
+    }
+
+    try {
+      const adapter = getAdapter(councilId);
+      const result = await adapter.resolveAddresses({
+        postcode: testPostcode,
+        correlationId: uuidv4()
+      });
+
+      const currentHash = hashObject(result.data || {});
+      const snapshot = schemaSnapshots.get(councilId);
+
+      let drifted = false;
+      let details = 'No previous snapshot available';
+      let recommendation = 'Baseline snapshot created';
+
+      if (snapshot) {
+        drifted = snapshot.hash !== currentHash;
+        details = drifted 
+          ? `Schema hash changed from ${snapshot.hash.substring(0, 8)} to ${currentHash.substring(0, 8)}`
+          : 'Schema matches previous snapshot';
+        recommendation = drifted 
+          ? 'Review adapter implementation and update schema snapshot if expected'
+          : 'No action required';
+      }
+
+      // Update snapshot
+      schemaSnapshots.set(councilId, {
+        hash: currentHash,
+        captured_at: new Date().toISOString()
+      });
+
+      return {
+        council_id: councilId,
+        drifted,
+        details,
+        recommendation,
+        current_hash: currentHash,
+        previous_hash: snapshot?.hash || null,
+        checked_at: new Date().toISOString()
+      };
+    } catch (error: any) {
+      reply.code(500).send({
+        error: 'Drift check failed',
+        message: error.message,
+        council_id: councilId
+      });
+    }
+  });
+
+  // 4. POST /v1/admin/adapters/:councilId/disable - Disable an adapter
+  server.post('/v1/admin/adapters/:councilId/disable', { preHandler: adminAuth }, async (request: any, reply: any) => {
+    const { councilId } = request.params;
+    const body: any = request.body || {};
+    const reason = body.reason || 'Manually disabled via admin API';
+
+    const council = councilRegistry.find(c => c.council_id === councilId);
+    if (!council) {
+      reply.code(404).send({ error: 'Council not found' });
+      return;
+    }
+
+    disabledAdapters.set(councilId, {
+      reason,
+      disabled_at: new Date().toISOString()
+    });
+
+    return {
+      disabled: true,
+      council_id: councilId,
+      reason,
+      disabled_at: disabledAdapters.get(councilId)?.disabled_at
+    };
+  });
+
+  // 5. POST /v1/admin/adapters/:councilId/enable - Re-enable an adapter
+  server.post('/v1/admin/adapters/:councilId/enable', { preHandler: adminAuth }, async (request: any, reply: any) => {
+    const { councilId } = request.params;
+
+    const council = councilRegistry.find(c => c.council_id === councilId);
+    if (!council) {
+      reply.code(404).send({ error: 'Council not found' });
+      return;
+    }
+
+    const wasDisabled = disabledAdapters.has(councilId);
+    disabledAdapters.delete(councilId);
+
+    return {
+      enabled: true,
+      council_id: councilId,
+      was_disabled: wasDisabled,
+      enabled_at: new Date().toISOString()
+    };
+  });
+
+  // 6. GET /v1/admin/drift - Run drift check on ALL adapters
+  server.get('/v1/admin/drift', { preHandler: adminAuth }, async () => {
+    const checked_at = new Date().toISOString();
+    const results = [];
+
+    for (const council of councilRegistry) {
+      const councilId = council.council_id;
+      const testPostcode = testPostcodes[councilId];
+
+      if (!testPostcode) {
+        results.push({
+          council_id: councilId,
+          status: 'no_test_postcode',
+          drifted: false
+        });
+        continue;
+      }
+
+      if (!isCouncilSupported(councilId)) {
+        results.push({
+          council_id: councilId,
+          status: 'not_supported',
+          drifted: false
+        });
+        continue;
+      }
+
+      if (disabledAdapters.has(councilId)) {
+        results.push({
+          council_id: councilId,
+          status: 'disabled',
+          drifted: false
+        });
+        continue;
+      }
+
+      try {
+        const adapter = getAdapter(councilId);
+        const result = await adapter.resolveAddresses({
+          postcode: testPostcode,
+          correlationId: uuidv4()
+        });
+
+        const currentHash = hashObject(result.data || {});
+        const snapshot = schemaSnapshots.get(councilId);
+
+        const drifted = snapshot ? snapshot.hash !== currentHash : false;
+
+        // Update snapshot
+        schemaSnapshots.set(councilId, {
+          hash: currentHash,
+          captured_at: checked_at
+        });
+
+        results.push({
+          council_id: councilId,
+          status: 'ok',
+          drifted,
+          hash: currentHash.substring(0, 16)
+        });
+      } catch (error: any) {
+        results.push({
+          council_id: councilId,
+          status: 'unreachable',
+          drifted: false,
+          error: error.message
+        });
+      }
+    }
+
+    const summary = {
+      checked_at,
+      total: results.length,
+      ok: results.filter(r => r.status === 'ok').length,
+      drifted: results.filter(r => r.drifted).length,
+      unreachable: results.filter(r => r.status === 'unreachable').length,
+      results
+    };
+
+    lastDriftCheck = summary;
+    return summary;
+  });
+
+  // 7. GET /v1/admin/adapters/:councilId/test - Test with sample postcode
+  server.get('/v1/admin/adapters/:councilId/test', { preHandler: adminAuth }, async (request: any, reply: any) => {
+    const { councilId } = request.params;
+
+    const testPostcode = testPostcodes[councilId];
+    if (!testPostcode) {
+      reply.code(400).send({ error: 'No test postcode configured for this council' });
+      return;
+    }
+
+    if (!isCouncilSupported(councilId)) {
+      reply.code(404).send({ error: 'Council not found or adapter not registered' });
+      return;
+    }
+
+    try {
+      const startTime = Date.now();
+      const adapter = getAdapter(councilId);
+      
+      const result = await adapter.resolveAddresses({
+        postcode: testPostcode,
+        correlationId: uuidv4()
+      });
+
+      const duration = Date.now() - startTime;
+
+      return {
+        council_id: councilId,
+        test_postcode: testPostcode,
+        success: result.success,
+        confidence: result.confidence,
+        duration_ms: duration,
+        address_count: result.data?.length || 0,
+        result,
+        tested_at: new Date().toISOString()
+      };
+    } catch (error: any) {
+      reply.code(500).send({
+        error: 'Test failed',
+        message: error.message,
+        council_id: councilId
+      });
+    }
   });
 
   // =============================================================================
