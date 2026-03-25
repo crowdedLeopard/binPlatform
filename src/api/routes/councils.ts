@@ -24,20 +24,41 @@ export function createCouncilRoutes(adapters: Map<string, CouncilAdapter>) {
    */
   app.get('/', async (c) => {
     try {
+      const auth = getAuthContext(c);
+      const isAdmin = auth.role === 'admin';
       const councils = [];
 
       for (const [councilId, adapter] of adapters.entries()) {
         const capabilities = await adapter.discoverCapabilities();
         const health = await adapter.verifyHealth();
+        const securityProfile = await adapter.securityProfile();
         
-        councils.push({
-          id: councilId,
-          name: capabilities.councilName,
-          status: health.status,
-          lookup_method: capabilities.primaryLookupMethod,
-          last_health_check: health.checkedAt,
-          is_production_ready: capabilities.isProductionReady,
-        });
+        // Determine adapter status from capabilities
+        const adapterStatus = capabilities.isProductionReady 
+          ? 'implemented' 
+          : health.status === 'unavailable' 
+            ? 'postponed' 
+            : 'stub';
+        
+        const baseFields = {
+          councilId,
+          councilName: capabilities.councilName,
+          adapterStatus,
+          lookupMethod: capabilities.primaryLookupMethod,
+          upstreamRiskLevel: securityProfile.riskLevel,
+        };
+
+        // Admin-only fields
+        if (isAdmin) {
+          councils.push({
+            ...baseFields,
+            killSwitchActive: false, // TODO: Query from database
+            lastHealthCheck: health.checkedAt,
+            currentConfidence: health.successRate24h >= 0.8 ? 0.85 : 0.65,
+          });
+        } else {
+          councils.push(baseFields);
+        }
       }
 
       return c.json({
@@ -64,16 +85,27 @@ export function createCouncilRoutes(adapters: Map<string, CouncilAdapter>) {
     }
 
     try {
+      const auth = getAuthContext(c);
+      const isAdmin = auth.role === 'admin';
       const capabilities = await adapter.discoverCapabilities();
       const health = await adapter.verifyHealth();
       const securityProfile = await adapter.securityProfile();
 
-      // Public response (admin-only fields stripped)
-      return c.json({
-        id: councilId,
-        name: capabilities.councilName,
+      // Determine adapter status
+      const adapterStatus = capabilities.isProductionReady 
+        ? 'implemented' 
+        : health.status === 'unavailable' 
+          ? 'postponed' 
+          : 'stub';
+
+      // Base response (public fields)
+      const response: any = {
+        councilId,
+        councilName: capabilities.councilName,
         website: capabilities.councilWebsite,
-        status: health.status,
+        adapterStatus,
+        lookupMethod: capabilities.primaryLookupMethod,
+        upstreamRiskLevel: securityProfile.riskLevel,
         capabilities: {
           supports_address_lookup: capabilities.supportsAddressLookup,
           supports_collection_services: capabilities.supportsCollectionServices,
@@ -82,7 +114,6 @@ export function createCouncilRoutes(adapters: Map<string, CouncilAdapter>) {
           max_event_range_days: capabilities.maxEventRangeDays,
           supported_service_types: capabilities.supportedServiceTypes,
         },
-        lookup_method: capabilities.primaryLookupMethod,
         limitations: capabilities.limitations,
         is_production_ready: capabilities.isProductionReady,
         last_updated: capabilities.adapterLastUpdated,
@@ -92,7 +123,16 @@ export function createCouncilRoutes(adapters: Map<string, CouncilAdapter>) {
           success_rate_24h: health.successRate24h,
           avg_response_time_ms: health.avgResponseTimeMs24h,
         },
-      });
+      };
+
+      // Admin-only fields
+      if (isAdmin) {
+        response.killSwitchActive = false; // TODO: Query from database
+        response.lastHealthCheck = health.checkedAt;
+        response.currentConfidence = health.successRate24h >= 0.8 ? 0.85 : 0.65;
+      }
+
+      return c.json(response);
     } catch (error) {
       const auth = getAuthContext(c);
       throw adapterUnavailable(councilId, auth.requestId);

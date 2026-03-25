@@ -37,6 +37,11 @@ scrape_configs:
       - targets:
           - monitor:3000
     scrape_interval: 30s
+    metric_relabel_configs:
+      # Ensure council_id label is preserved for per-council alerting
+      - source_labels: [council_id]
+        action: labeldrop
+        regex: ^$  # Drop only if empty
 
   # Prometheus self-monitoring
   - job_name: 'prometheus'

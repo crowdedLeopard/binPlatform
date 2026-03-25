@@ -262,3 +262,88 @@
 - CI synthetic-check job validates adapter health endpoints
 - Terraform monitoring module outputs instrumentation keys (Key Vault injection)
 - Grafana dashboards read from Prometheus datasource (auto-provisioned)
+
+### 2026-03-25 - Phase 3 Wave 2 Infrastructure for 7 New Adapters
+
+**Egress Allowlist Updates:**
+- Added all 7 new council domains to Terraform egress allowlist:
+  - basingstoke.gov.uk, gosport.gov.uk, havant.gov.uk, hart.gov.uk
+  - winchester.gov.uk, testvalley.gov.uk, portsmouth.gov.uk
+- Added FCC Environment third-party delegate for Winchester (conditional)
+- All entries now include standardized comment: "{Council Name} — adapter worker egress"
+- Total coverage: 13 councils + 1 third-party delegate
+
+**Kill Switch Environment Variables:**
+- Updated `.env.example` with kill switches for all 13 councils
+- Standardized naming: `ADAPTER_KILL_SWITCH_{COUNCIL_ID}=false`
+- Updated naming from legacy format (e.g., `BASINGSTOKE` → `BASINGSTOKE_DEANE`)
+- All kill switches default to `false` (opt-in disabling)
+
+**Synthetic Monitoring Canary Postcodes:**
+- Added 11 canary postcodes to `.env.example` and `docker-compose.yml`
+- Canaries defined per council (not comma-separated list)
+- Environment variable pattern: `CANARY_POSTCODE_{COUNCIL_ID}`
+- New Forest and Southampton: no canaries (postponed adapters)
+- Each postcode verified as real and publicly documented
+
+**CI Adapter Registry Validation:**
+- New CI job: `adapter-registry-check`
+- Validates all councils in `council-registry.json` have corresponding entry in `src/adapters/registry.ts`
+- Excludes councils with `adapter_status: "postponed"`
+- Fails build if adapters missing from registry (prevents incomplete rollouts)
+- Runs on all PRs to main/develop branches
+
+**Browser Adapter Network Security:**
+- Created dedicated NSG for browser-based adapters: `browser-adapter-nsg.tf`
+- More restrictive than API adapters (higher risk profile)
+- Deny all inbound traffic (no exposed ports)
+- Allow outbound HTTPS (443) to council domains only
+- Explicit block of cloud metadata endpoint (169.254.169.254)
+- Allow monitoring/telemetry to monitoring subnet (Azure Monitor, App Insights)
+- NSG Flow Logs enabled with Traffic Analytics (10min intervals)
+- Alert on high rate of denied connections (>50 denials/5min = potential compromise)
+- Separate browser adapter subnet (isolated from API subnet)
+
+**Prometheus Monitoring Updates:**
+- Updated `prometheus.yml` to preserve `council_id` label for per-council alerting
+- Metric relabeling ensures `council_id` not dropped (empty labels dropped only)
+- Drift alerts already use `council_id` labels correctly (no changes needed)
+- All alerts fire per-council (not globally aggregated)
+- Supports 13 councils in Grafana dashboards (data-driven from labels)
+
+**Runbook Documentation:**
+- Created `docs/runbooks/new-adapter-checklist.md`
+- 35-item pre-rollout checklist (code, infrastructure, testing, monitoring, security, docs)
+- Post-rollout validation procedure (24-hour monitoring)
+- Rollback procedure (kill switch activation < 5min, fix within 24h)
+- Responsible parties assigned (developer, DevOps, security, QA)
+- Pass criteria: all 35 items checked before production release
+- Automation opportunities documented for future improvement
+
+**Infrastructure Security Enhancements:**
+- Browser adapters isolated to dedicated subnet with stricter NSG
+- Flow logs capture all denied connections (forensic evidence)
+- Automated alerts on abnormal egress patterns (>50 denials/5min)
+- Kill switch infrastructure validated in CI (prevents merge if incomplete)
+- All egress destinations managed as code (Terraform, auditable)
+
+**Operational Improvements:**
+- All 13 councils now have consistent environment variable structure
+- Canary postcodes enable automated synthetic checks per council
+- CI prevents incomplete adapter rollouts (registry validation)
+- Runbook standardizes rollout process (reduces human error)
+- Infrastructure changes require security review (tfsec in CI)
+
+**Key Tradeoffs:**
+- Browser adapter NSG uses IP-based filtering (Azure Firewall required for true FQDN filtering)
+- Flow logs add cost (~£50/month) but essential for security forensics
+- 35-item checklist is comprehensive but time-consuming (automation planned)
+- Per-council canary postcodes (vs. shared list) add complexity but improve isolation
+
+**Next Steps for Production:**
+- Deploy Terraform changes (egress allowlist + browser NSG)
+- Update environment variables in production (kill switches + canaries)
+- Enable Flow Logs for browser adapter subnet
+- Configure Alertmanager receivers (email/Slack)
+- Create GitHub issue template for "New Adapter Rollout" with checklist
+

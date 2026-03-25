@@ -1,22 +1,124 @@
-// TODO: new-forest adapter
-import { BaseAdapter } from '../base/base-adapter.js';
-import { AdapterMetadata, AdapterHealth, PropertyQuery, CollectionSchedule } from '../base/interface.js';
+/**
+ * New Forest District Council Adapter — POSTPONED
+ * 
+ * Status: POSTPONED (Upstream bot protection active)
+ * Reason: 403 Forbidden responses indicate aggressive bot protection (likely Incapsula/Imperva).
+ *         Automated access blocked at network level. Manual review required.
+ * 
+ * See: docs/discovery/new-forest-postponed.md
+ * 
+ * @module adapters/new-forest
+ */
 
-export class Adapter extends BaseAdapter {
-  readonly metadata: AdapterMetadata = {
-    councilId: 'new-forest',
-    councilName: 'Council Name', // TODO: Set proper name
-    adapterType: 'scrape',
-    requiresAuth: false
-  };
+import type {
+  CouncilAdapter,
+  CouncilCapabilities,
+  PropertyLookupInput,
+  PropertyIdentity,
+  AddressCandidateResult,
+  CollectionServiceResult,
+  CollectionEventResult,
+  DateRange,
+  AdapterHealth,
+  AdapterSecurityProfile,
+  AcquisitionMetadata,
+} from '../base/adapter.interface.js';
+import {
+  LookupMethod,
+  FailureCategory,
+  ExecutionRiskLevel,
+  HealthStatus,
+  ServiceType,
+} from '../base/adapter.interface.js';
 
-  async healthCheck(): Promise<AdapterHealth> {
-    return { healthy: true, consecutiveFailures: 0 };
+export class NewForestAdapter implements CouncilAdapter {
+  readonly councilId = 'new-forest';
+
+  async discoverCapabilities(): Promise<CouncilCapabilities> {
+    return {
+      councilId: this.councilId,
+      councilName: 'New Forest District Council',
+      councilWebsite: 'https://www.newforest.gov.uk',
+      supportsAddressLookup: false,
+      supportsCollectionServices: false,
+      supportsCollectionEvents: false,
+      providesUprn: false,
+      primaryLookupMethod: LookupMethod.UNSUPPORTED,
+      maxEventRangeDays: 0,
+      supportedServiceTypes: [],
+      limitations: [
+        'Upstream bot protection active (403 Forbidden)',
+        'Automated access blocked at network level',
+        'Adapter postponed pending manual review',
+      ],
+      rateLimitRpm: 0,
+      adapterLastUpdated: '2026-03-25',
+      isProductionReady: false,
+    };
   }
 
-  async getCollectionSchedule(query: PropertyQuery): Promise<CollectionSchedule> {
-    throw new Error('Not implemented');
+  async resolveAddresses(input: PropertyLookupInput): Promise<AddressCandidateResult> {
+    return this.unavailableResponse(input.correlationId);
   }
 
-  async cleanup(): Promise<void> {}
+  async getCollectionEvents(
+    property: PropertyIdentity,
+    range?: DateRange
+  ): Promise<CollectionEventResult> {
+    return this.unavailableResponse(property.correlationId);
+  }
+
+  async getCollectionServices(property: PropertyIdentity): Promise<CollectionServiceResult> {
+    return this.unavailableResponse(property.correlationId);
+  }
+
+  async verifyHealth(): Promise<AdapterHealth> {
+    return {
+      status: HealthStatus.UNAVAILABLE,
+      checkedAt: new Date().toISOString(),
+      upstreamReachable: false,
+      lastSuccessAt: null,
+      lastFailureAt: new Date().toISOString(),
+      lastFailureCategory: FailureCategory.BOT_DETECTION,
+      lastFailureMessage: 'Upstream bot protection active — automated access blocked',
+      successRate24h: 0,
+      avgResponseTimeMs24h: 0,
+      acquisitionCount24h: 0,
+      schemaDriftDetected: false,
+    };
+  }
+
+  async securityProfile(): Promise<AdapterSecurityProfile> {
+    return {
+      riskLevel: ExecutionRiskLevel.CRITICAL,
+      requiresBrowserAutomation: true,
+      externalDomains: ['www.newforest.gov.uk'],
+      lastSecurityReview: '2026-03-25',
+      knownVulnerabilities: [],
+      mitigations: [
+        'Adapter disabled — upstream blocks automated access',
+        'Manual review required to determine if access is possible',
+      ],
+    };
+  }
+
+  private unavailableResponse(correlationId: string): any {
+    const metadata: AcquisitionMetadata = {
+      acquiredAt: new Date().toISOString(),
+      acquisitionDurationMs: 0,
+      retryCount: 0,
+      correlationId,
+      upstreamRequestId: null,
+      cacheHit: false,
+      evidenceCaptured: false,
+    };
+
+    return {
+      success: false,
+      failureCategory: FailureCategory.BOT_DETECTION,
+      errorMessage: 'Upstream bot protection active — manual review required. This council has been postponed due to 403 Forbidden responses indicating aggressive bot detection.',
+      metadata,
+      warnings: ['Adapter postponed — automated access not possible'],
+    };
+  }
 }

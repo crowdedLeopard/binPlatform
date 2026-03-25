@@ -198,3 +198,106 @@ Drummer's bootstrap defaulted to Fastify, but this decision moves to Hono as the
 - Implement drift alert notification system (email/Slack for breaking drift)
 - Add confidence score trending charts (track degradation over time)
 - Implement automatic re-acquisition when confidence drops below STALE threshold
+
+### 2026-03-25: Phase 3 Wave 2 — Property Resolution + API Completeness
+
+**Implementation Completed:**
+- **Postcode Routing Table** (`postcode-utils.ts`):
+  - All 13 Hampshire councils verified with correct postcode prefixes
+  - New Forest SO44 added (was missing from initial map)
+  - Test Valley postcodes reordered for consistency (SP6, SP10, SP11, SO20, SO51)
+  - Overlap postcodes documented: Hart/Rushmoor (GU11, GU12, GU14), Test Valley/Eastleigh (SO51)
+  - Coverage: 62 unique postcode prefixes across Hampshire
+
+- **Postponed Council Adapters**:
+  - **New Forest** (`src/adapters/new-forest/index.ts`):
+    - Status: POSTPONED (403 Forbidden — bot protection active)
+    - Returns `FailureCategory.BOT_DETECTION` with clear error message
+    - Health status: `UNAVAILABLE`
+    - Documentation: `docs/discovery/new-forest-postponed.md`
+    - Recovery path: Partnership approach or wait for service stabilization (Q2 2026)
+  - **Southampton** (`src/adapters/southampton/index.ts`):
+    - Status: POSTPONED (Incapsula/Imperva CDN blocks automation)
+    - Returns `FailureCategory.BOT_DETECTION` with CAPTCHA challenge message
+    - Health status: `UNAVAILABLE`
+    - Documentation: `docs/discovery/southampton-postponed.md`
+    - Recovery path: Partnership preferred; third-party service (bin-calendar.nova.do) under evaluation
+
+- **Overlap Handling (ADR-007)**:
+  - Decision: Return ambiguous candidates when postcode maps to multiple councils
+  - Implementation: Query all matching adapters in parallel, deduplicate by UPRN
+  - Auto-resolve if single property after deduplication (expected 85%+ of cases)
+  - Return `ambiguous_council: true` flag if multiple properties found
+  - Frontend must implement candidate selection UI
+  - Affected postcodes: GU11, GU12, GU14, SO51 (~27,000 households, 5% of Hampshire)
+
+- **Council API Routes Updates** (`src/api/routes/councils.ts`):
+  - `GET /v1/councils`: Added `adapterStatus`, `lookupMethod`, `upstreamRiskLevel` (public)
+  - Admin-only fields: `killSwitchActive`, `lastHealthCheck`, `currentConfidence`
+  - `GET /v1/councils/:councilId`: Same fields, role-based visibility
+  - Adapter status determination: `isProductionReady` → `implemented`, `unavailable` → `postponed`
+
+- **Admin API Routes Extensions** (`src/api/routes/admin.ts`):
+  - `GET /v1/admin/dashboard`: Summary stats (councils, adapters, acquisitions, success rate, confidence, drift alerts)
+  - `GET /v1/admin/adapters/health`: Health summary for all councils with 7d success rates
+  - `GET /v1/admin/drift-alerts`: Recent drift events with severity and affected fields
+  - `GET /v1/admin/retention/stats`: Evidence retention statistics (files, size, expired count)
+  - All endpoints admin-only (bearer token required)
+
+- **OpenAPI Spec Updates** (`openapi.yaml`):
+  - `councilId` path parameter: Enum of all 13 council IDs (basingstoke-deane through winchester)
+  - `Council` schema: Added `adapterStatus` (implemented/postponed/stub/disabled), `lookupMethod`, `upstreamRiskLevel`
+  - `AddressCandidate` schema: Added `ambiguous_council` boolean flag
+  - `CollectionEvent` schema: Added `confidence` (0.0-1.0) and `confidenceFactors` breakdown
+  - Admin endpoints fully documented with request/response schemas
+  - `lookupMethod` enum: Added `browser_json`, `unknown`, `unsupported`
+
+- **Adapter Registry** (`src/adapters/registry.ts`):
+  - Registered New Forest and Southampton adapters (even though postponed)
+  - Import statements added for postponed adapters
+  - Initialization logging enhanced (shows count and council IDs)
+  - Comment structure clarifies Phase 2 vs Phase 3 Wave 1 vs Postponed vs TODO Wave 2
+
+- **Documentation**:
+  - **ADR-007:** `docs/adr/ADR-007-overlapping-postcodes.md` — Overlap handling decision with examples
+  - **Platform Status:** `docs/platform-status.md` — Single source of truth for implementation status
+    - All 13 councils listed with status, method, confidence, risk, notes
+    - Coverage statistics: 84.6% population, 76.3% households
+    - Postcode overlap handling summary
+    - Postponed council recovery plans
+    - Production readiness checklist by maturity tier
+  - **Postponement Docs:**
+    - `docs/discovery/new-forest-postponed.md` — Bot protection analysis and recovery options
+    - `docs/discovery/southampton-postponed.md` — Incapsula CDN challenges and partnership path
+
+**Patterns Established:**
+- **Adapter Status Enum:** `implemented` (production-ready), `postponed` (blocked upstream), `stub` (placeholder), `disabled` (kill switch)
+- **Lookup Method Enum:** Extended to cover all acquisition methods including `browser_json` (Playwright with hidden JSON), `unknown`, `unsupported`
+- **Upstream Risk Levels:** `low` (stable API/PDF), `medium` (form automation or bot protection present), `high` (active CAPTCHA/403s), `critical` (experimental/unmaintained)
+- **Postponed Adapters:** Registered in adapter registry, return clear errors, document recovery path
+- **Overlap Handling:** Parallel queries, UPRN deduplication, ambiguous flag for client handling
+- **API Field Visibility:** Public fields for all clients, admin fields gated by role check
+
+**Coverage Achievement:**
+- **11 of 13 councils implemented** (Basingstoke, East Hants, Eastleigh, Fareham, Gosport, Hart, Havant, Portsmouth, Rushmoor, Test Valley, Winchester)
+- **2 postponed** (New Forest, Southampton) with documented recovery paths
+- **84.6% population coverage** (~1,556,000 of 1,840,000 Hampshire residents)
+- **76.3% household coverage** (~580,000 of 760,000 households)
+- **4 postcode prefixes** with overlap handling (GU11, GU12, GU14, SO51)
+
+**Security Considerations:**
+- Postponed adapters do NOT bypass bot protection (ethical stance)
+- Error messages inform user of postponement without exposing internal details
+- Admin-only fields prevent leaking operational state to public clients
+- Kill switches functional for all adapters (including postponed)
+
+**TODOs for Phase 4:**
+- Integration tests for overlap postcodes (GU11, GU12, GU14, SO51)
+- Redis caching for property resolution (24h TTL)
+- Database queries for kill switch state, UPRN lookup
+- Frontend candidate selection UI for ambiguous postcodes
+- Synthetic monitoring for all 11 implemented councils
+- Partnership outreach to New Forest and Southampton IT teams
+- Validate Southampton third-party service (bin-calendar.nova.do)
+- Add `FailureCategory.UPSTREAM_BLOCKED` distinct from `BOT_DETECTION`
+

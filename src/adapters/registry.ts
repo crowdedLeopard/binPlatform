@@ -12,6 +12,17 @@ import { EastleighAdapter } from './eastleigh/index.js';
 import { RushmoorAdapter } from './rushmoor/index.js';
 import { FarehamAdapter } from './fareham/index.js';
 import { EastHampshireAdapter } from './east-hampshire/index.js';
+import { NewForestAdapter } from './new-forest/index.js';
+import { SouthamptonAdapter } from './southampton/index.js';
+// Phase 3 Wave 2 adapters (Batch A - form-based)
+import { BasingstokeDeaneAdapter } from './basingstoke-deane/index.js';
+import { GosportAdapter } from './gosport/index.js';
+import { HavantAdapter } from './havant/index.js';
+import { HartAdapter } from './hart/index.js';
+// Phase 3 Wave 2 adapters (Batch B - form-based + React SPA)
+import { PortsmouthAdapter } from './portsmouth/index.js';
+import { TestValleyAdapter } from './test-valley/index.js';
+import { WinchesterAdapter } from './winchester/index.js';
 
 export class AdapterDisabledError extends Error {
   constructor(councilId: string) {
@@ -97,17 +108,32 @@ export function initializeAdapters(): void {
   adapterRegistry.register(new EastleighAdapter());
   adapterRegistry.register(new RushmoorAdapter());
   
-  // Register Phase 3 adapters (Fareham, East Hampshire)
+  // Register Phase 3 Wave 1 adapters (Fareham, East Hampshire)
   adapterRegistry.register(new FarehamAdapter());
   adapterRegistry.register(new EastHampshireAdapter());
   
-  // TODO: Register Phase 4+ adapters as implemented
-  // adapterRegistry.register(new HartAdapter());
-  // adapterRegistry.register(new GosportAdapter());
-  // ... etc
+  // Register postponed adapters (New Forest, Southampton)
+  adapterRegistry.register(new NewForestAdapter());
+  adapterRegistry.register(new SouthamptonAdapter());
+  
+  // Register Phase 3 Wave 2 adapters - Batch A (form-based councils)
+  adapterRegistry.register(new BasingstokeDeaneAdapter());
+  adapterRegistry.register(new GosportAdapter());
+  adapterRegistry.register(new HavantAdapter());
+  adapterRegistry.register(new HartAdapter());
+  
+  // Register Phase 3 Wave 2 adapters - Batch B (form-based + React SPA)
+  adapterRegistry.register(new PortsmouthAdapter());
+  adapterRegistry.register(new TestValleyAdapter());
+  adapterRegistry.register(new WinchesterAdapter());
   
   const registeredCount = adapterRegistry.getAll().length;
   console.log(`[REGISTRY] Initialized ${registeredCount} adapter(s)`);
+  
+  // Log status of each adapter
+  for (const adapter of adapterRegistry.getAll()) {
+    console.log(`  - ${adapter.councilId}: registered`);
+  }
 }
 
 /**

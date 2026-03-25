@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Address Lookup - Basingstoke and Deane Borough Council</title>
+</head>
+<body>
+    <h1>Find Your Bin Collection Day</h1>
+    <form id="addressForm" action="/bincollections/lookup" method="post">
+        <input type="hidden" name="_csrf" value="basingstoke_csrf_token_abc123">
+        
+        <div class="results">
+            <h2>Select Your Address</h2>
+            <select name="propertyId" id="propertySelect">
+                <option value="">-- Please select --</option>
+                <option value="bstk_100062295543">1 London Road, Basingstoke, RG21 4AF</option>
+                <option value="bstk_100062295544">2 London Road, Basingstoke, RG21 4AF</option>
+                <option value="bstk_100062295545">3 London Road, Basingstoke, RG21 4AF</option>
+                <option value="bstk_100062295546">4 London Road, Basingstoke, RG21 4AF</option>
+            </select>
+            <button type="submit">View Collection Dates</button>
+        </div>
+    </form>
+</body>
+</html>

@@ -15,11 +15,11 @@ const HAMPSHIRE_POSTCODE_MAP: Record<string, string[]> = {
   'gosport': ['PO12', 'PO13'],
   'hart': ['GU11', 'GU12', 'GU13', 'GU14', 'GU17', 'GU46', 'GU51', 'GU52'],
   'havant': ['PO7', 'PO8', 'PO9'],
-  'new-forest': ['SO40', 'SO41', 'SO42', 'SO43', 'SO45', 'BH23', 'BH24', 'BH25'],
+  'new-forest': ['SO40', 'SO41', 'SO42', 'SO43', 'SO44', 'SO45', 'BH23', 'BH24', 'BH25'],
   'portsmouth': ['PO1', 'PO2', 'PO3', 'PO4', 'PO5', 'PO6'],
   'rushmoor': ['GU9', 'GU10', 'GU11', 'GU12', 'GU14'],
   'southampton': ['SO14', 'SO15', 'SO16', 'SO17', 'SO18', 'SO19'],
-  'test-valley': ['SP10', 'SP11', 'SP6', 'SO20', 'SO51'],
+  'test-valley': ['SP6', 'SP10', 'SP11', 'SO20', 'SO51'],
   'winchester': ['SO21', 'SO22', 'SO23', 'SO32'],
 };
 

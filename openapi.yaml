@@ -507,6 +507,168 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
 
+  /v1/admin/dashboard:
+    get:
+      operationId: getDashboardStats
+      summary: Get admin dashboard statistics
+      description: Returns summary statistics for the admin dashboard
+      tags: [Admin]
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Dashboard statistics
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [stats]
+                properties:
+                  stats:
+                    type: object
+                    properties:
+                      total_councils:
+                        type: integer
+                      active_adapters:
+                        type: integer
+                      degraded_adapters:
+                        type: integer
+                      disabled_adapters:
+                        type: integer
+                      acquisitions_today:
+                        type: integer
+                      success_rate:
+                        type: number
+                      avg_confidence:
+                        type: number
+                      pending_drift_alerts:
+                        type: integer
+                      open_security_events:
+                        type: integer
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /v1/admin/adapters/health:
+    get:
+      operationId: getAdaptersHealth
+      summary: Get adapter health summary
+      description: Returns health summary for all adapters
+      tags: [Admin]
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Adapter health summaries
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [adapters]
+                properties:
+                  adapters:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        council_id:
+                          type: string
+                        status:
+                          type: string
+                        success_rate_7d:
+                          type: number
+                        last_success:
+                          type: string
+                          format: date-time
+                        last_failure:
+                          type: string
+                          format: date-time
+                        confidence:
+                          type: number
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /v1/admin/drift-alerts:
+    get:
+      operationId: getDriftAlerts
+      summary: Get drift alerts
+      description: Returns recent drift detection alerts across all councils
+      tags: [Admin]
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: List of drift alerts
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [alerts]
+                properties:
+                  alerts:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        alert_id:
+                          type: string
+                        council_id:
+                          type: string
+                        severity:
+                          type: string
+                          enum: [minor, major, breaking]
+                        drift_type:
+                          type: string
+                        affected_fields:
+                          type: array
+                          items:
+                            type: string
+                        detected_at:
+                          type: string
+                          format: date-time
+                        acknowledged:
+                          type: boolean
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /v1/admin/retention/stats:
+    get:
+      operationId: getRetentionStats
+      summary: Get evidence retention statistics
+      description: Returns statistics about evidence storage and retention
+      tags: [Admin]
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Retention statistics
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [stats]
+                properties:
+                  stats:
+                    type: object
+                    properties:
+                      total_files:
+                        type: integer
+                      total_size_bytes:
+                        type: integer
+                      expired_count:
+                        type: integer
+                      retention_window_days:
+                        type: integer
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
 components:
   securitySchemes:
     ApiKeyAuth:
@@ -545,34 +707,65 @@ components:
   schemas:
     Council:
       type: object
-      required: [id, name, shortName, adapterStatus]
+      required: [councilId, councilName, adapterStatus, lookupMethod, upstreamRiskLevel]
       properties:
-        id:
+        councilId:
           type: string
-          description: Unique council identifier
-          example: basingstoke
-        name:
+          description: Unique council identifier (kebab-case)
+          enum:
+            - basingstoke-deane
+            - east-hampshire
+            - eastleigh
+            - fareham
+            - gosport
+            - hart
+            - havant
+            - new-forest
+            - portsmouth
+            - rushmoor
+            - southampton
+            - test-valley
+            - winchester
+          example: eastleigh
+        councilName:
           type: string
           description: Official council name
-          example: Basingstoke and Deane Borough Council
-        shortName:
-          type: string
-          description: Short display name
-          example: Basingstoke
-        website:
-          type: string
-          format: uri
-          description: Council website URL
+          example: Eastleigh Borough Council
         adapterStatus:
           type: string
-          enum: [active, beta, development, disabled, unsupported]
-          description: Current adapter status
+          enum: [implemented, postponed, stub, disabled]
+          description: Current adapter implementation status
+        lookupMethod:
+          type: string
+          enum: [api, hidden_json, html_form, pdf_calendar, browser_automation, browser_json, unknown, unsupported]
+          description: Method used by adapter to acquire data
+        upstreamRiskLevel:
+          type: string
+          enum: [low, medium, high, critical]
+          description: Risk level of upstream data source (brittleness, bot protection, etc.)
+        killSwitchActive:
+          type: boolean
+          description: Kill switch status (admin-only field)
+        lastHealthCheck:
+          type: string
+          format: date-time
+          description: Last health check timestamp (admin-only field)
+        currentConfidence:
+          type: number
+          format: float
+          minimum: 0.0
+          maximum: 1.0
+          description: Current confidence score (admin-only field)
 
     CouncilDetail:
       allOf:
         - $ref: '#/components/schemas/Council'
         - type: object
           properties:
+            website:
+              type: string
+              format: uri
+              description: Council website URL
             binInfoUrl:
               type: string
               format: uri
@@ -582,10 +775,43 @@ components:
               items:
                 type: string
               description: Service types supported by this council
-            lookupMethod:
+            capabilities:
+              type: object
+              properties:
+                supports_address_lookup:
+                  type: boolean
+                supports_collection_services:
+                  type: boolean
+                supports_collection_events:
+                  type: boolean
+                provides_uprn:
+                  type: boolean
+                max_event_range_days:
+                  type: integer
+            limitations:
+              type: array
+              items:
+                type: string
+              description: Known limitations of this adapter
+            is_production_ready:
+              type: boolean
+            last_updated:
               type: string
-              enum: [api, hidden_json, html_form, pdf_calendar, browser_automation]
-              description: Method used to acquire data
+              format: date
+            health:
+              type: object
+              properties:
+                status:
+                  type: string
+                  enum: [healthy, degraded, unavailable]
+                last_success:
+                  type: string
+                  format: date-time
+                success_rate_24h:
+                  type: number
+                  format: float
+                avg_response_time_ms:
+                  type: number
 
     AddressCandidate:
       type: object
@@ -612,6 +838,10 @@ components:
         councilId:
           type: string
           description: Council identifier
+        ambiguous_council:
+          type: boolean
+          description: True if postcode maps to multiple councils (overlap area)
+          default: false
 
     CollectionService:
       type: object
@@ -710,6 +940,24 @@ components:
         rescheduleReason:
           type: string
           description: Reason for rescheduling (e.g., bank holiday)
+        confidence:
+          type: number
+          format: float
+          minimum: 0.0
+          maximum: 1.0
+          description: Confidence score for this collection event (from Phase 3 confidence system)
+        confidenceFactors:
+          type: object
+          description: Breakdown of confidence calculation
+          properties:
+            method:
+              type: number
+            freshness:
+              type: number
+            validation:
+              type: number
+            health:
+              type: number
         notes:
           type: string
           description: Additional notes

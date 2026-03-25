@@ -8,55 +8,60 @@ locals {
   council_egress_destinations = {
     basingstoke_deane = {
       domain      = "basingstoke.gov.uk"
-      description = "Basingstoke and Deane Borough Council"
+      description = "Basingstoke and Deane Borough Council — adapter worker egress"
     }
     east_hampshire = {
       domain      = "easthants.gov.uk"
-      description = "East Hampshire District Council"
+      description = "East Hampshire District Council — adapter worker egress"
     }
     eastleigh = {
       domain      = "my.eastleigh.gov.uk"
-      description = "Eastleigh Borough Council - MyEastleigh portal"
+      description = "Eastleigh Borough Council — adapter worker egress"
     }
     fareham = {
       domain      = "fareham.gov.uk"
-      description = "Fareham Borough Council"
+      description = "Fareham Borough Council — adapter worker egress"
     }
     gosport = {
       domain      = "gosport.gov.uk"
-      description = "Gosport Borough Council"
+      description = "Gosport Borough Council — adapter worker egress"
     }
     hart = {
       domain      = "hart.gov.uk"
-      description = "Hart District Council"
+      description = "Hart District Council — adapter worker egress"
     }
     havant = {
       domain      = "havant.gov.uk"
-      description = "Havant Borough Council"
+      description = "Havant Borough Council — adapter worker egress"
     }
     new_forest = {
       domain      = "newforest.gov.uk"
-      description = "New Forest District Council"
+      description = "New Forest District Council — adapter worker egress"
     }
     portsmouth = {
       domain      = "portsmouth.gov.uk"
-      description = "Portsmouth City Council"
+      description = "Portsmouth City Council — adapter worker egress"
     }
     rushmoor = {
       domain      = "rushmoor.gov.uk"
-      description = "Rushmoor Borough Council"
+      description = "Rushmoor Borough Council — adapter worker egress"
     }
     southampton = {
       domain      = "southampton.gov.uk"
-      description = "Southampton City Council"
+      description = "Southampton City Council — adapter worker egress"
     }
     test_valley = {
       domain      = "testvalley.gov.uk"
-      description = "Test Valley Borough Council"
+      description = "Test Valley Borough Council — adapter worker egress"
     }
     winchester = {
       domain      = "winchester.gov.uk"
-      description = "Winchester City Council"
+      description = "Winchester City Council — adapter worker egress"
+    }
+    # Third-party service providers (conditional)
+    winchester_fcc = {
+      domain      = "fccenvironment.co.uk"
+      description = "Winchester City Council — FCC Environment third-party delegate — adapter worker egress (conditional, Winchester may route through this provider)"
     }
   }
 

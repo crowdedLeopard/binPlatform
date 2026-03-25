@@ -430,6 +430,34 @@ jobs:
         with:
           sarif_file: results.sarif
 
+  adapter-registry-check:
+    name: Adapter Registry Completeness
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      
+      - name: Validate adapter registry completeness
+        run: |
+          node -e "
+          const registry = require('./data/council-registry.json');
+          const fs = require('fs');
+          const registryTs = fs.readFileSync('./src/adapters/registry.ts', 'utf8');
+          const missing = registry.councils
+            .filter(c => c.adapter_status !== 'postponed')
+            .filter(c => !registryTs.includes(c.council_id));
+          if (missing.length > 0) {
+            console.error('❌ Missing adapters in registry.ts:');
+            missing.forEach(c => console.error('  -', c.council_id, '(' + c.name + ')'));
+            process.exit(1);
+          }
+          console.log('✅ All adapters registered in registry.ts');
+          "
+
   build:
     name: Build Application
     runs-on: ubuntu-latest

@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Bin Collection Lookup - Gosport Borough Council</title>
+</head>
+<body>
+    <h1>Check Your Bin Collection Day</h1>
+    <form id="lookupForm" method="post" action="/waste/lookup">
+        <input type="hidden" name="csrfToken" value="gosport_token_xyz789">
+        
+        <div class="address-results">
+            <label for="addressSelect">Select your property:</label>
+            <select id="addressSelect" name="uprn">
+                <option value="">Choose address...</option>
+                <option value="gos_100062347821">1 High Street, Gosport, PO12 1BU</option>
+                <option value="gos_100062347822">1A High Street, Gosport, PO12 1BU</option>
+                <option value="gos_100062347823">2 High Street, Gosport, PO12 1BU</option>
+            </select>
+            <button type="submit">Continue</button>
+        </div>
+    </form>
+</body>
+</html>

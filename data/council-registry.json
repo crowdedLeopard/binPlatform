@@ -24,7 +24,10 @@
       "upstream_risk_level": "medium",
       "recommended_adapter_approach": "HTML scraping with form automation. Consider using existing UKBinCollectionData patterns as reference. Fallback to browser automation if scraping breaks.",
       "brittleness_concerns": "HTML structure changes would break adapter. No API contract. Community scraper exists as fallback pattern.",
-      "rate_limit_guidance": "Unknown - respect reasonable throttling (1-2 req/sec max). Monitor for 429 or blocks."
+      "rate_limit_guidance": "Unknown - respect reasonable throttling (1-2 req/sec max). Monitor for 429 or blocks.",
+      "adapter_status": "implemented",
+      "adapter_version": "1.0.0",
+      "implementation_date": "2026-03-25"
     },
     {
       "council_id": "east-hampshire",
@@ -62,7 +65,7 @@
         "service_info_only": false,
         "machine_readable_endpoint": true
       },
-      "confidence_score": 0.90,
+      "confidence_score": 0.9,
       "last_verified": "2026-03-25",
       "acquisition_path_summary": "UPRN-based endpoint at my.eastleigh.gov.uk/apex/EBC_Waste_Calendar?UPRN=<uprn>. Two-step: (1) postcode → UPRN lookup, (2) UPRN query returns collection calendar. Oracle APEX backend.",
       "notes": "EXCELLENT CANDIDATE. Known working endpoint: https://my.eastleigh.gov.uk/apex/EBC_Waste_Calendar?UPRN=100060321174. Oracle APEX application. Community reports recent bot protection added (403 errors from some scrapers). MyEastleigh account system exists but UPRN endpoint may work unauthenticated. Requires UPRN resolution first (can use OS AddressBase or council postcode lookup).",
@@ -110,7 +113,7 @@
         "service_info_only": false,
         "machine_readable_endpoint": false
       },
-      "confidence_score": 0.70,
+      "confidence_score": 0.7,
       "last_verified": "2026-03-25",
       "acquisition_path_summary": "Postcode search form. Cookie consent banner present. Downloadable PDF calendars for 2025/26. No visible API. Likely requires form automation and HTML parsing.",
       "notes": "Simple postcode lookup form (requires space in postcode). Cookie consent banner detected. Provides downloadable annual PDF calendar. No API identified. Standard web form automation pattern. PDF calendar is year-long (can be cached).",
@@ -120,7 +123,10 @@
       "upstream_risk_level": "medium",
       "recommended_adapter_approach": "Form POST automation with postcode. Handle cookie consent. Parse HTML response or download/parse PDF calendar for year-ahead data. PDF parsing adds reliability.",
       "brittleness_concerns": "HTML structure changes. Cookie consent banner changes. PDF format changes (less likely).",
-      "rate_limit_guidance": "Conservative throttling. 1 req/2sec max. Monitor for blocks."
+      "rate_limit_guidance": "Conservative throttling. 1 req/2sec max. Monitor for blocks.",
+      "adapter_status": "implemented",
+      "adapter_version": "1.0.0",
+      "implementation_date": "2026-03-25"
     },
     {
       "council_id": "hart",
@@ -134,7 +140,7 @@
         "service_info_only": false,
         "machine_readable_endpoint": false
       },
-      "confidence_score": 0.70,
+      "confidence_score": 0.7,
       "last_verified": "2026-03-25",
       "acquisition_path_summary": "Postcode form lookup. Year-round calendar download available. Alternative 'In your area' map tool (maps.hart.gov.uk). No visible API. Backend platform unconfirmed.",
       "notes": "Postcode lookup returns collection day and downloadable year-round calendar. Also offers map-based lookup via maps.hart.gov.uk/mycouncil.aspx. No public info on backend platform (not Whitespace, Bartec, or Alloy confirmed). Standard form automation pattern.",
@@ -144,7 +150,10 @@
       "upstream_risk_level": "medium",
       "recommended_adapter_approach": "Form automation with postcode → parse HTML response or download calendar. Map tool as alternative data source if main form blocks automation. Calendar download preferred for caching.",
       "brittleness_concerns": "HTML changes. Form parameters change. Map tool dependency if primary fails.",
-      "rate_limit_guidance": "Throttle to 1-2 req/sec. Monitor for blocks."
+      "rate_limit_guidance": "Throttle to 1-2 req/sec. Monitor for blocks.",
+      "adapter_status": "implemented",
+      "adapter_version": "1.0.0",
+      "implementation_date": "2026-03-25"
     },
     {
       "council_id": "havant",
@@ -168,7 +177,10 @@
       "upstream_risk_level": "medium",
       "recommended_adapter_approach": "Form automation with postcode/address → HTML parsing. PDF calendars as supplementary data source (year-ahead cache). Need to handle North/South area distinction.",
       "brittleness_concerns": "HTML structure changes. North/South area system changes. Calendar format changes.",
-      "rate_limit_guidance": "Throttle 1-2 req/sec. Standard respectful polling."
+      "rate_limit_guidance": "Throttle 1-2 req/sec. Standard respectful polling.",
+      "adapter_status": "implemented",
+      "adapter_version": "1.0.0",
+      "implementation_date": "2026-03-25"
     },
     {
       "council_id": "new-forest",
@@ -182,7 +194,7 @@
         "service_info_only": false,
         "machine_readable_endpoint": false
       },
-      "confidence_score": 0.60,
+      "confidence_score": 0.6,
       "last_verified": "2026-03-25",
       "acquisition_path_summary": "Postcode lookup service. Phased rollout of new wheelie bin service (2025-26) with phase checker tool. Site returned 403 on fetch attempt - possible bot protection. Rural district with complex phasing.",
       "notes": "CAUTION: 403 forbidden on automated fetch attempt. Site may have aggressive bot protection. Phased service changes 2025-26 with different collection patterns per phase. Postcode checker to determine phase. Rural district with varied geography. May require browser automation due to bot protection.",
@@ -216,7 +228,10 @@
       "upstream_risk_level": "medium",
       "recommended_adapter_approach": "Form automation via My Portsmouth portal. Handle Granicus session/cookies. Inspect XHR traffic to find underlying API calls. Community scrapers exist as reference. Consider headless browser if form automation fails.",
       "brittleness_concerns": "Granicus platform updates. Form structure changes. Session requirements tightening.",
-      "rate_limit_guidance": "Respectful throttling. 1-2 req/sec. Monitor for blocks from Granicus infrastructure."
+      "rate_limit_guidance": "Respectful throttling. 1-2 req/sec. Monitor for blocks from Granicus infrastructure.",
+      "adapter_status": "implemented",
+      "adapter_version": "1.0.0",
+      "implementation_date": "2026-03-25"
     },
     {
       "council_id": "rushmoor",
@@ -254,7 +269,7 @@
         "service_info_only": false,
         "machine_readable_endpoint": false
       },
-      "confidence_score": 0.60,
+      "confidence_score": 0.6,
       "last_verified": "2026-03-25",
       "acquisition_path_summary": "Bin collection calendar with postcode/street name input. Site uses Incapsula (Imperva) bot protection. 403 blocks likely. Third-party UPRN service exists (bin-calendar.nova.do).",
       "notes": "CAUTION: Incapsula/Imperva bot protection detected on site. Likely to block automated access. Calendar requires postcode/street name (min 6 chars). Third-party service 'Bin Calendar' (bin-calendar.nova.do) offers UPRN-based lookup for Southampton - may be more reliable than direct council access. Large urban authority. Consider third-party proxy or browser automation.",
@@ -278,7 +293,7 @@
         "service_info_only": false,
         "machine_readable_endpoint": false
       },
-      "confidence_score": 0.70,
+      "confidence_score": 0.7,
       "last_verified": "2026-03-25",
       "acquisition_path_summary": "Postcode lookup form. Alternate weekly collections (black bin one week, brown recycling next). My Test Valley portal exists but no API documented. Community tools available.",
       "notes": "Standard postcode lookup. Alternate weekly service (black household waste, brown recycling). My Test Valley app/portal exists (my.testvalley.gov.uk) but no public API. Form automation pattern. Bins must be out by 7am. No downloadable calendar identified.",
@@ -288,7 +303,10 @@
       "upstream_risk_level": "medium",
       "recommended_adapter_approach": "Form automation with postcode → parse HTML response. Check My Test Valley portal for potential API endpoints. Community tools (UKBinCollectionData) may have working implementations as reference.",
       "brittleness_concerns": "HTML structure changes. No calendar download complicates caching. Portal changes could affect lookup.",
-      "rate_limit_guidance": "Standard throttling 1-2 req/sec. Monitor for blocks."
+      "rate_limit_guidance": "Standard throttling 1-2 req/sec. Monitor for blocks.",
+      "adapter_status": "implemented",
+      "adapter_version": "1.0.0",
+      "implementation_date": "2026-03-25"
     },
     {
       "council_id": "winchester",
@@ -312,7 +330,10 @@
       "upstream_risk_level": "medium",
       "recommended_adapter_approach": "Browser automation with Playwright/Puppeteer for postcode lookup → extract results from rendered page. Alternative: XHR inspection to find API endpoints (likely exist but undocumented). Community PWA code (github) as reference for data structures. Calendar download available which could be cached.",
       "brittleness_concerns": "React application updates. API endpoints change (if discovered). Calendar format changes. Browser automation overhead.",
-      "rate_limit_guidance": "If using browser automation: slow and respectful (5-10 sec between requests). If API discovered: standard throttling 1-2 req/sec."
+      "rate_limit_guidance": "If using browser automation: slow and respectful (5-10 sec between requests). If API discovered: standard throttling 1-2 req/sec.",
+      "adapter_status": "implemented",
+      "adapter_version": "1.0.0",
+      "implementation_date": "2026-03-25"
     }
   ]
 }
