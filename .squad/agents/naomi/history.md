@@ -1338,3 +1338,51 @@ avigateToLookupPage() — Navigate with domain validation
 - Update council registry to mark as equires_credentials: false
 - Consider caching postcode lookups (council rarely changes for a postcode)
 
+
+---
+
+## 2026-01-25 — Fixed Fareham end-to-end collections flow
+
+**Problem:**
+Fareham API requires postcode for lookup, but getCollectionEvents(uprn) was only receiving UPRN, causing 503 errors: "Cannot fetch by UPRN alone - postcode context required."
+
+**Solution:**
+Encoded postcode in property ID to enable end-to-end flow:
+
+**Changes Made:**
+1. **Fareham Adapter - resolveAddresses:**
+   - Changed property ID format from areham:100060355983 
+   - To: areham:PO167DZ:100060355983 (councilId:postcode_no_spaces:uprn)
+   - Now includes postcode context for later retrieval
+
+2. **Fareham Adapter - getCollectionEvents:**
+   - Updated fetchFarehamDataByAddress to parse new format
+   - Splits localPropertyId on ':' to extract postcode and UPRN
+   - Re-queries Fareham endpoint with postcode
+   - Matches by UPRN (from calendar link) or falls back to index
+
+3. **Server.ts (both endpoints):**
+   - Changed from split(':') expecting exactly 2 parts
+   - To: indexOf(':') + substring() to split on FIRST colon only
+   - Allows localId to contain colons (e.g., "PO167DZ:100060355983")
+
+**Property ID Format:**
+- Full ID: areham:PO167DZ:100060355983
+- Server splits: councilId = "fareham", localPropertyId = "PO167DZ:100060355983"
+- Adapter parses localPropertyId: postcode = "PO167DZ", uprn = "100060355983"
+
+**Build Result:**
+- ✓ 
+pm run build — zero errors
+- ✓ TypeScript compilation successful
+
+**Git Commit:**
+- Commit: 009d5d5
+- Message: "fix: Fareham postcode-in-propertyId for end-to-end collections"
+- Pushed to master
+
+**Expected Behavior:**
+1. GET /v1/postcodes/PO16 7DZ/addresses → Returns addresses with IDs like areham:PO167DZ:100060355983
+2. GET /v1/properties/fareham:PO167DZ:100060355983/collections → Should now return REAL collection dates
+
+The collections flow should work end-to-end. Property IDs now include postcode context, enabling the adapter to re-query the Fareham API and return actual collection schedules.

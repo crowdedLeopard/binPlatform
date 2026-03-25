@@ -768,3 +768,70 @@ These errors are in separate adapters and were not part of the original blocking
 3. Monitor evidence storage for schema drift
 4. Consider implementing address search via external UPRN lookup service
 
+
+---
+
+## 2026-03-25 — Implemented adapter-first address resolution
+
+**Problem:**
+GET /v1/postcodes/PO12 1BT/addresses was returning synthetic property IDs because:
+1. Route called central uprnResolutionService directly
+2. Service has no OS Places API key configured
+3. Falls back to synthetic_gosport_PO121BT_1 style IDs
+4. But Gosport, Hart, Fareham, Rushmoor, and Basingstoke-Deane adapters have their OWN resolveAddresses() that call council endpoints with real UPRNs
+
+**Solution:**
+Modified GET /v1/postcodes/:postcode/addresses route to prefer council adapters over central UPRN resolution.
+
+**Implementation Details:**
+
+**Route Handler Strategy:**
+1. If councilId query param provided → use that adapter directly (unchanged)
+2. Otherwise:
+   a. Use determineCouncilFromPostcode() to detect council via postcodes.io
+   b. If council detected and adapter available → call adapter.resolveAddresses()
+   c. If adapter succeeds with confidence ≥ 0.8 → return those results
+   d. If adapter fails/unavailable/low-confidence → fall back to central UPRN resolution
+
+**Key Implementation Points:**
+- Added 15s timeout wrapper around adapter calls using Promise.race()
+- Adapter calls wrapped in try/catch with detailed logging
+- Falls through gracefully on adapter failure
+- Central UPRN resolution (OS Places / synthetic fallback) still available as last resort
+- source_method now reports 'council_adapter' when adapter used
+
+**Files Modified:**
+- src/api/server.ts:
+  - Added import for determineCouncilFromPostcode
+  - Rewrote route handler with adapter-first logic (lines 836-970)
+  - Added detailed logging for adapter success/failure/fallback
+  - Timeout protection for adapter calls
+
+**Adapters with Real resolveAddresses:**
+1. **Fareham** — queries fareham.gov.uk/internetlookups/search_data.aspx → confidence 0.9-1.0
+2. **Gosport** — queries Supatrak API by postcode → confidence 0.9-1.0
+3. **Hart** — queries Hart JSON API by postcode → confidence 0.9-1.0
+4. **Rushmoor** — queries rushmoor.gov.uk/Umbraco/Api/BinLookUpWorkAround/Get → confidence 0.9-1.0
+5. **Basingstoke-Deane** — queries basingstoke.gov.uk council endpoint → confidence 0.9-1.0
+
+**Build Status:** ✅ npm run build — ZERO errors
+
+**Git Commit:**
+- Commit: 009d5d5 (bundled with Fareham property ID fix)
+- Pushed to master
+
+**Expected Behavior:**
+- GET /v1/postcodes/PO12 1BT/addresses → Now returns REAL Gosport UPRNs from Supatrak API
+- GET /v1/postcodes/PO16 7DZ/addresses → Now returns REAL Fareham UPRNs from council endpoint
+- GET /v1/postcodes/GU51 3HL/addresses → Now returns REAL Hart UPRNs from Hart API
+- GET /v1/postcodes/GU11 3JN/addresses → Now returns REAL Rushmoor UPRNs from council API
+- GET /v1/postcodes/RG21 4AH/addresses → Now returns REAL Basingstoke UPRNs from council API
+- Postcodes outside these 5 councils → Fall back to OS Places (if key set) or synthetic IDs
+
+**Confidence Scores:**
+All adapters with resolveAddresses return confidence ≥ 0.8 (typically 0.9-1.0) because they're querying official council endpoints that return verified address data. The 0.8 threshold ensures we only bypass central resolution when we have high-quality council data.
+
+**Next Steps:**
+- Monitor logs to see adapter vs fallback usage rates
+- Consider adding cache layer for postcode → council mapping (postcodes.io calls)
+- Track adapter success rates for health monitoring
