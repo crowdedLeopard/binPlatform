@@ -11,7 +11,7 @@ import { createHash } from 'crypto';
 import { getAdapter, isCouncilSupported, initializeAdapters } from '../adapters/registry.js';
 import type { PropertyLookupInput, PropertyIdentity, DateRange } from '../adapters/base/adapter.interface.js';
 import { v4 as uuidv4 } from 'uuid';
-import { resolvePostcodeToUprn } from '../services/uprn-resolution.js';
+import { resolvePostcodeToUprn, determineCouncilFromPostcode } from '../services/uprn-resolution.js';
 import { generateMockCollections } from '../services/mock-collections.js';
 
 // Initialize adapters at module load
@@ -835,6 +835,12 @@ export async function buildServer() {
   /**
    * GET /v1/postcodes/:postcode/addresses
    * Resolve postcode to address candidates
+   * 
+   * Strategy (adapter-first resolution):
+   * 1. If councilId query param provided → use that adapter directly
+   * 2. Otherwise, determine council from postcode via postcodes.io
+   * 3. Try council adapter's resolveAddresses if available
+   * 4. Fall back to central UPRN resolution if adapter unavailable/fails
    */
   server.get('/v1/postcodes/:postcode/addresses', async (request: any, reply: any) => {
     const { postcode } = request.params;
@@ -893,13 +899,84 @@ export async function buildServer() {
             address: addr.addressDisplay,
             council_id: councilId,
           })) || [],
-          source_method: 'api',
+          source_method: 'council_adapter',
           source_timestamp: new Date().toISOString(),
           confidence: result.confidence,
         };
       }
 
-      // No councilId — use UPRN resolution service
+      // No councilId specified — determine council and try adapter-first resolution
+      let detectedCouncilId: string | null = null;
+      
+      try {
+        detectedCouncilId = await determineCouncilFromPostcode(normalizedPostcode);
+      } catch (detectionError) {
+        // Log but continue to fallback
+        request.log.warn({ err: detectionError, postcode: normalizedPostcode }, 
+          'Failed to determine council from postcode, falling back to UPRN resolution');
+      }
+
+      // Try council adapter if detected and available
+      if (detectedCouncilId && isCouncilSupported(detectedCouncilId)) {
+        try {
+          const adapter = getAdapter(detectedCouncilId);
+          const input: PropertyLookupInput = {
+            postcode: normalizedPostcode,
+            correlationId: uuidv4(),
+          };
+
+          // Wrap adapter call with 15s timeout
+          const timeoutPromise = new Promise<never>((_, reject) => 
+            setTimeout(() => reject(new Error('Adapter timeout')), 15000)
+          );
+
+          const adapterResult = await Promise.race([
+            adapter.resolveAddresses(input),
+            timeoutPromise
+          ]);
+
+          // If adapter succeeded with good confidence, use those results
+          if (adapterResult.success && adapterResult.data && adapterResult.data.length > 0 && adapterResult.confidence >= 0.8) {
+            request.log.info({ 
+              councilId: detectedCouncilId, 
+              addressCount: adapterResult.data.length,
+              confidence: adapterResult.confidence 
+            }, 'Adapter resolveAddresses succeeded');
+
+            return {
+              postcode: normalizedPostcode,
+              council_id: detectedCouncilId,
+              addresses: adapterResult.data.map(addr => ({
+                id: `${detectedCouncilId}:${addr.councilLocalId}`,
+                uprn: addr.uprn,
+                address: addr.addressDisplay,
+                council_id: detectedCouncilId,
+                confidence: addr.confidence,
+              })),
+              count: adapterResult.data.length,
+              source_method: 'council_adapter',
+              source_timestamp: new Date().toISOString(),
+              confidence: adapterResult.confidence,
+            };
+          } else {
+            // Low confidence or no results, fall through
+            request.log.warn({ 
+              councilId: detectedCouncilId,
+              success: adapterResult.success,
+              addressCount: adapterResult.data?.length || 0,
+              confidence: adapterResult.confidence 
+            }, 'Adapter resolveAddresses returned low-confidence results, falling back');
+          }
+        } catch (adapterError) {
+          // Log and fall through to central resolution
+          request.log.warn({ 
+            councilId: detectedCouncilId, 
+            err: adapterError 
+          }, 'Council adapter resolveAddresses failed, falling back to central UPRN resolution');
+        }
+      }
+
+      // Fall back to central UPRN resolution
       try {
         const addresses = await resolvePostcodeToUprn(normalizedPostcode);
         
@@ -974,8 +1051,9 @@ export async function buildServer() {
     const { from, to } = request.query;
 
     // Parse propertyId format: councilId:localId
-    const parts = propertyId.split(':');
-    if (parts.length !== 2) {
+    // Note: localId may contain colons (e.g., fareham:PO167DZ:100060355983)
+    const colonIndex = propertyId.indexOf(':');
+    if (colonIndex === -1) {
       return reply.code(400).send({
         statusCode: 400,
         error: 'Bad Request',
@@ -983,7 +1061,8 @@ export async function buildServer() {
       });
     }
 
-    const [councilId, localId] = parts;
+    const councilId = propertyId.substring(0, colonIndex);
+    const localId = propertyId.substring(colonIndex + 1);
 
     // Check if council supported
     if (!isCouncilSupported(councilId)) {
@@ -1082,8 +1161,9 @@ export async function buildServer() {
     const { propertyId } = request.params;
 
     // Parse propertyId format: councilId:localId
-    const parts = propertyId.split(':');
-    if (parts.length !== 2) {
+    // Note: localId may contain colons (e.g., fareham:PO167DZ:100060355983)
+    const colonIndex = propertyId.indexOf(':');
+    if (colonIndex === -1) {
       return reply.code(400).send({
         statusCode: 400,
         error: 'Bad Request',
@@ -1091,7 +1171,8 @@ export async function buildServer() {
       });
     }
 
-    const [councilId, localId] = parts;
+    const councilId = propertyId.substring(0, colonIndex);
+    const localId = propertyId.substring(colonIndex + 1);
 
     // Check if council supported
     if (!isCouncilSupported(councilId)) {

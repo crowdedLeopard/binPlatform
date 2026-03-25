@@ -123,14 +123,18 @@ export class FarehamAdapter implements CouncilAdapter {
       }
       
       // Convert each row to an address candidate
-      // Store postcode in councilLocalId so we can re-fetch later
+      // Encode postcode in property ID so we can re-fetch later
       const candidates = rows.map((row: FarehamAddressRow, index: number) => {
         // Extract UPRN from calendar link if available
         const calendarMatch = row.Calendar?.match(/ref=(\d+)/);
         const uprn = calendarMatch ? calendarMatch[1] : undefined;
         
-        // Store both postcode and row index to retrieve this specific row later
-        const localId = uprn || `${input.postcode}:${index}`;
+        // Format: postcode (no spaces):uprn or postcode:index
+        // Example: PO167DZ:100060355983
+        const postcodeNoSpaces = input.postcode.replace(/\s+/g, '');
+        const localId = uprn 
+          ? `${postcodeNoSpaces}:${uprn}` 
+          : `${postcodeNoSpaces}:${index}`;
         
         return {
           councilLocalId: localId,
@@ -519,50 +523,56 @@ export class FarehamAdapter implements CouncilAdapter {
     councilLocalId: string,
     metadata: AcquisitionMetadata
   ): Promise<BaseResult<FarehamAddressRow>> {
-    // Parse councilLocalId - format is either UPRN or "postcode:index"
-    let postcode: string | undefined;
-    let identifier: string | undefined;
+    // Parse councilLocalId - format is now "postcode:uprn" or "postcode:index"
+    // Example: "PO167DZ:100060355983" or "PO167DZ:0"
+    const parts = councilLocalId.split(':');
     
-    if (councilLocalId.includes(':')) {
-      const parts = councilLocalId.split(':');
-      postcode = parts[0];
-      identifier = parts[1]; // This is the row index
-    } else {
-      // Assume it's a UPRN - we need to search for it
-      identifier = councilLocalId;
-    }
-    
-    if (!postcode && !identifier) {
+    if (parts.length < 2) {
       return this.failureResult(
         metadata,
         FailureCategory.VALIDATION_ERROR,
-        'Invalid councilLocalId format - cannot determine postcode'
+        'Cannot fetch by UPRN alone - postcode context required'
       );
     }
     
-    // If we have a postcode:index format, fetch by postcode
-    if (postcode) {
-      const response = await this.fetchFarehamData(postcode, metadata);
-      
-      if (!response.success || !response.data) {
-        return this.failureResult(
-          metadata,
-          response.failureCategory || FailureCategory.UNKNOWN,
-          response.errorMessage || 'Failed to fetch data'
-        );
-      }
-      
-      const rows = response.data.data?.rows || [];
-      const index = parseInt(identifier || '0', 10);
-      
-      if (index >= rows.length) {
-        return this.failureResult(
-          metadata,
-          FailureCategory.NOT_FOUND,
-          `Address index ${index} not found in postcode ${postcode}`
-        );
-      }
-      
+    const postcode = parts[0]; // "PO167DZ"
+    const identifier = parts[1]; // "100060355983" or "0"
+    
+    // Re-query Fareham endpoint with postcode
+    const response = await this.fetchFarehamData(postcode, metadata);
+    
+    if (!response.success || !response.data) {
+      return this.failureResult(
+        metadata,
+        response.failureCategory || FailureCategory.UNKNOWN,
+        response.errorMessage || 'Failed to fetch data'
+      );
+    }
+    
+    const rows = response.data.data?.rows || [];
+    
+    // Try to match by UPRN first
+    const uprnMatch = rows.find((row: FarehamAddressRow) => {
+      const calendarMatch = row.Calendar?.match(/ref=(\d+)/);
+      return calendarMatch && calendarMatch[1] === identifier;
+    });
+    
+    if (uprnMatch) {
+      return {
+        success: true,
+        data: uprnMatch,
+        acquisitionMetadata: metadata,
+        sourceEvidenceRef: response.sourceEvidenceRef,
+        confidence: 0.85,
+        warnings: response.warnings,
+        securityWarnings: response.securityWarnings,
+        fromCache: false,
+      };
+    }
+    
+    // Fall back to index-based lookup
+    const index = parseInt(identifier, 10);
+    if (!isNaN(index) && index >= 0 && index < rows.length) {
       return {
         success: true,
         data: rows[index],
@@ -575,11 +585,10 @@ export class FarehamAdapter implements CouncilAdapter {
       };
     }
     
-    // If we only have a UPRN, we can't fetch without postcode context
     return this.failureResult(
       metadata,
-      FailureCategory.VALIDATION_ERROR,
-      'Cannot fetch by UPRN alone - postcode context required. Use resolveAddresses first.'
+      FailureCategory.NOT_FOUND,
+      `Address not found for identifier ${identifier} in postcode ${postcode}`
     );
   }
   
