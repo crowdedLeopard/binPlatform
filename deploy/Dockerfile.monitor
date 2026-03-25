@@ -1,6 +1,6 @@
 # Multi-stage build for synthetic monitoring worker
 # Stage 1: Builder
-FROM node:20-alpine AS builder
+FROM node:25-alpine AS builder
 
 WORKDIR /build
 
@@ -25,7 +25,7 @@ RUN npm prune --production
 
 # Stage 2: Runtime
 # Pin digest for reproducibility — update quarterly
-FROM node:20-alpine@sha256:2d5e8a8a51bc341fd5f2eed6d91455c3a3d147e91a14298fc564b5dc519c1666 AS runtime
+FROM node:25-alpine@sha256:5209bcaca9836eb3448b650396213dbe9d9a34d31840c2ae1f206cb2986a8543 AS runtime
 
 # Build arguments for labeling
 ARG BUILD_DATE
