@@ -1037,3 +1037,61 @@ avigateToLookupPage() — Navigate with domain validation
 - Removed redundant `src/api/routes/postcodes.ts` file (integrated directly)
 
 ---
+
+
+## Learnings
+
+### Real UPRN Resolution Implementation (2026-03-25)
+
+**Task:** Replace mock UPRN resolution with real postcodes.io + OS Places API integration
+
+**Implementation:**
+
+1. **postcodes.io Integration (Free, No API Key)**
+   - Validates UK postcodes are real (404 for invalid postcodes)
+   - Returns council name via dmin_district field
+   - Provides lat/lng coordinates (future use for boundary validation)
+   - Timeout: 10s with AbortController
+   - Mapped 13 Hampshire councils: "Eastleigh" → "eastleigh", "Test Valley" → "test-valley", etc.
+
+2. **OS Places API Integration (Real UPRNs)**
+   - Optional: requires OS_PLACES_API_KEY environment variable
+   - Returns actual OS UPRN data with full addresses
+   - Filters for DPA (Delivery Point Address) records only
+   - Timeout: 10s with AbortController
+   - Confidence: 1.0 for real OS data
+
+3. **Graceful Degradation**
+   - If OS_PLACES_API_KEY not set: logs warning, falls back to synthetic property IDs
+   - If OS Places API errors: logs warning, continues to fallback
+   - Synthetic addresses: confidence 0.5, UPRN format synthetic_{council}_{postcode}_{n}
+
+4. **API Route Updates**
+   - Updated /v1/postcodes/:postcode/addresses to use new service
+   - Response now includes source_method: "os_places" | "postcodes_io_fallback"
+   - Better error handling: 400 for invalid format, 503 for upstream timeout, 404 for not found
+   - Preserved existing response shape (no breaking changes)
+
+5. **Error Handling**
+   - All fetch calls use AbortController with 10s timeout
+   - Postcode validation before any external API calls
+   - Upstream errors don't crash server — return appropriate HTTP codes
+   - TypeScript strict mode — zero ny types used
+
+**Technical Details:**
+- ESM imports with .js extensions (per project standards)
+- No new dependencies (uses built-in fetch)
+- TypeScript strict mode: all types explicit
+- Build passes with zero errors
+
+**Testing Notes:**
+- Any Hampshire postcode now returns real addresses (if OS key set)
+- Postcodes outside Hampshire return 404 (not in our council mapping)
+- Invalid postcodes return 400
+- Upstream timeouts return 503
+
+**Future Enhancements:**
+- Cache postcodes.io responses (council rarely changes for a postcode)
+- ETags/If-Modified-Since for OS Places API
+- Retry logic for transient failures
+- Metrics for API success/failure rates

@@ -14,8 +14,7 @@ import { RushmoorAdapter } from './rushmoor/index.js';
 import { FarehamAdapter } from './fareham/index.js';
 import { EastHampshireAdapter } from './east-hampshire/index.js';
 import { NewForestAdapter } from './new-forest/index.js';
-// Southampton not yet implemented
-// import { SouthamptonAdapter } from './southampton/index.js';
+import { SouthamptonAdapter } from './southampton/index.js';
 // Phase 3 Wave 2 adapters (Batch A - form-based)
 import { BasingstokeDeaneAdapter } from './basingstoke-deane/index.js';
 import { GosportAdapter } from './gosport/index.js';
@@ -71,8 +70,7 @@ const adapterImplementations: Record<string, () => CouncilAdapter> = {
   'fareham': () => new FarehamAdapter(),
   'east-hampshire': () => new EastHampshireAdapter(),
   'new-forest': () => new NewForestAdapter(),
-  // Southampton adapter not yet implemented
-  // 'southampton': () => new SouthamptonAdapter(),
+  'southampton': () => new SouthamptonAdapter(),
   'basingstoke-deane': () => new BasingstokeDeaneAdapter(),
   'gosport': () => new GosportAdapter(),
   'havant': () => new HavantAdapter(),
@@ -207,8 +205,7 @@ export function initializeAdapters(): void {
   
   // Register postponed adapters (New Forest)
   adapterRegistry.register(new NewForestAdapter());
-  // Southampton adapter not yet implemented - commented out
-  // adapterRegistry.register(new SouthamptonAdapter());
+  adapterRegistry.register(new SouthamptonAdapter());
   
   // Register Phase 3 Wave 2 adapters - Batch A (form-based councils)
   adapterRegistry.register(new BasingstokeDeaneAdapter());

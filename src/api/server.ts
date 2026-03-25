@@ -900,30 +900,61 @@ export async function buildServer() {
       }
 
       // No councilId — use UPRN resolution service
-      const addresses = await resolvePostcodeToUprn(normalizedPostcode);
-      
-      if (addresses.length === 0) {
-        return reply.code(404).send({
-          statusCode: 404,
-          error: 'Not Found',
-          message: `No addresses found for postcode '${normalizedPostcode}'. Try SO50 5PN (Eastleigh) or PO16 7XX (Fareham) for demo.`,
-          postcode: normalizedPostcode
-        });
+      try {
+        const addresses = await resolvePostcodeToUprn(normalizedPostcode);
+        
+        if (addresses.length === 0) {
+          return reply.code(404).send({
+            statusCode: 404,
+            error: 'Not Found',
+            message: `No addresses found for postcode '${normalizedPostcode}'. Postcode may be invalid or outside Hampshire.`,
+            postcode: normalizedPostcode
+          });
+        }
+
+        // Determine source method based on whether OS Places API key is set
+        const hasOsPlacesKey = !!process.env.OS_PLACES_API_KEY;
+        const sourceMethod = hasOsPlacesKey && addresses[0].confidence === 1.0 
+          ? 'os_places' 
+          : 'postcodes_io_fallback';
+        
+        return {
+          postcode: normalizedPostcode,
+          addresses: addresses.map(addr => ({
+            id: `${addr.councilId}:${addr.uprn}`,
+            address: addr.address,
+            uprn: addr.uprn,
+            council_id: addr.councilId,
+            confidence: addr.confidence
+          })),
+          count: addresses.length,
+          source_method: sourceMethod,
+          source_timestamp: new Date().toISOString()
+        };
+      } catch (uprnError) {
+        // Handle UPRN resolution errors (e.g., postcodes.io timeout)
+        const errorMessage = (uprnError as Error).message;
+        
+        if (errorMessage.includes('timeout')) {
+          return reply.code(503).send({
+            statusCode: 503,
+            error: 'Service Unavailable',
+            message: 'Upstream address lookup service timeout',
+            postcode: normalizedPostcode
+          });
+        }
+        
+        if (errorMessage.includes('Invalid UK postcode format')) {
+          return reply.code(400).send({
+            statusCode: 400,
+            error: 'Bad Request',
+            message: errorMessage,
+            postcode: normalizedPostcode
+          });
+        }
+        
+        throw uprnError; // Re-throw unexpected errors to outer catch
       }
-      
-      return {
-        postcode: normalizedPostcode,
-        addresses: addresses.map(addr => ({
-          id: `${addr.councilId}:${addr.uprn}`,
-          address: addr.address,
-          uprn: addr.uprn,
-          council_id: addr.councilId,
-          confidence: addr.confidence
-        })),
-        count: addresses.length,
-        source_method: 'uprn_lookup',
-        source_timestamp: new Date().toISOString()
-      };
     } catch (error) {
       request.log.error({ err: error, postcode: normalizedPostcode, councilId }, 'Address lookup error');
       return reply.code(500).send({
