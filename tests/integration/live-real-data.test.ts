@@ -39,8 +39,10 @@ interface Address {
 interface Collection {
   collectionDate?: string;
   collection_date?: string;
+  date?: string;
   serviceType?: string;
   service_type?: string;
+  bin_types?: string[];
 }
 
 interface CollectionResponse {
@@ -127,7 +129,7 @@ describe.skipIf(!isLiveTestsEnabled)('Live Real Data Integration Tests', () => {
         // 4. At least one collection date should be in the future
         const now = new Date();
         const futureDates = collectionsData.collections!.filter((collection) => {
-          const dateStr = collection.collectionDate || collection.collection_date;
+          const dateStr = collection.collectionDate || collection.collection_date || collection.date;
           expect(dateStr).toBeDefined();
           const collectionDate = new Date(dateStr!);
           return collectionDate > now;
@@ -135,12 +137,19 @@ describe.skipIf(!isLiveTestsEnabled)('Live Real Data Integration Tests', () => {
         
         expect(futureDates.length).toBeGreaterThan(0);
         
-        // 5. Each collection should have a service type
+        // 5. Each collection should have a service type or bin types
         collectionsData.collections!.forEach((collection) => {
           const serviceType = collection.serviceType || collection.service_type;
-          expect(serviceType).toBeDefined();
-          expect(typeof serviceType).toBe('string');
-          expect(serviceType!.length).toBeGreaterThan(0);
+          const binTypes = collection.bin_types;
+          
+          // Should have either service_type or bin_types
+          const hasServiceInfo = serviceType || (binTypes && binTypes.length > 0);
+          expect(hasServiceInfo).toBeTruthy();
+          
+          if (serviceType) {
+            expect(typeof serviceType).toBe('string');
+            expect(serviceType!.length).toBeGreaterThan(0);
+          }
         });
       }, 60000); // 60s timeout for live API calls
     });

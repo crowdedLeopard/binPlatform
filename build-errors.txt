@@ -1,0 +1,15 @@
+src/adapters/fareham/index.ts(36,15): error TS2305: Module '"./types.js"' has no exported member 'FarehamJsonResponse'.
+src/adapters/fareham/index.ts(36,36): error TS2305: Module '"./types.js"' has no exported member 'FarehamAddressRow'.
+src/adapters/fareham/index.ts(40,3): error TS2305: Module '"./parser.js"' has no exported member 'normalizeServiceType'.
+src/adapters/fareham/index.ts(103,35): error TS2339: Property 'fetchFarehamData' does not exist on type 'FarehamAdapter'.
+src/adapters/fareham/index.ts(162,35): error TS2339: Property 'fetchFarehamDataByAddress' does not exist on type 'FarehamAdapter'.
+src/adapters/fareham/index.ts(226,21): error TS2304: Cannot find name 'calculateConfidence'.
+src/adapters/fareham/index.ts(282,34): error TS2339: Property 'config' does not exist on type 'FarehamAdapter'.
+src/adapters/fareham/index.ts(301,25): error TS2304: Cannot find name 'FarehamBartecResponse'.
+src/adapters/fareham/index.ts(312,39): error TS2339: Property 'sendSoapRequest' does not exist on type 'FarehamAdapter'.
+src/adapters/fareham/index.ts(314,20): error TS2304: Cannot find name 'BARTEC_NAMESPACE'.
+src/adapters/fareham/index.ts(333,21): error TS2304: Cannot find name 'BartecSoapResponse'.
+src/adapters/fareham/index.ts(333,47): error TS2339: Property 'parseXmlResponse' does not exist on type 'FarehamAdapter'.
+src/adapters/fareham/index.ts(336,26): error TS2339: Property 'extractSoapFault' does not exist on type 'FarehamAdapter'.
+src/adapters/fareham/index.ts(346,20): error TS2304: Cannot find name 'parseBartecResponse'.
+src/adapters/fareham/index.ts(382,21): error TS2304: Cannot find name 'calculateConfidence'.

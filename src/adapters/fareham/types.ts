@@ -1,15 +1,61 @@
 /**
- * Fareham Borough Council - Bartec Response Types
+ * Fareham Borough Council - Response Types
  * 
- * Type definitions for Bartec Collective SOAP/XML responses.
- * Based on discovery of Bartec platform used by Fareham.
+ * Type definitions for JSON API responses.
+ * Replaces Bartec SOAP implementation with public JSON endpoint.
  * 
  * @module adapters/fareham/types
  */
 
 /**
+ * Fareham JSON API response structure.
+ * Used by the public search_data.aspx endpoint.
+ */
+export interface FarehamJsonResponse {
+  'information about this dataset'?: {
+    copyright?: string;
+    'usage rights'?: string;
+    date?: string;
+    message?: string;
+  };
+  data?: {
+    rows?: FarehamAddressRow[];
+  };
+}
+
+/**
+ * Individual address row from JSON API.
+ */
+export interface FarehamAddressRow {
+  /** Row number */
+  Row?: string;
+  
+  /** Full address */
+  Address?: string;
+  
+  /** Bin collection information (e.g., "26/03/2026 (Refuse) and 02/04/2026 (Recycling)") */
+  BinCollectionInformation?: string;
+  
+  /** Garden waste collection day (e.g., "Thursday 02/04/2026") */
+  'GardenWasteBinDay<br/>(seenotesabove)'?: string;
+  
+  /** Link to calendar (contains UPRN in URL) */
+  Calendar?: string;
+  
+  /** Legacy field from old dataset */
+  DomesticBinDay?: string;
+  
+  /** Legacy garden waste field */
+  GardenWasteDay?: string;
+  
+  /** Legacy garden waste field variant */
+  GardenWasteBinDay?: string;
+}
+
+/**
  * Parsed Bartec Features_Get response.
  * Structure based on typical Bartec Collective API responses.
+ * Used as a fallback/reference implementation.
  */
 export interface FarehamBartecResponse {
   /** Property UPRN */

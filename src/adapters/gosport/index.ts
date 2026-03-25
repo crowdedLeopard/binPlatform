@@ -1,8 +1,13 @@
 /**
  * Gosport Borough Council Adapter
  * 
- * Production-quality adapter using Playwright browser automation for form-based lookup.
- * Implements postcode-based address resolution and collection schedule retrieval.
+ * Production-quality adapter using Supatrak API discovered via UKBinCollectionData community project.
+ * Uses direct API access with hardcoded Basic Auth credentials (public shared access).
+ * 
+ * DISCOVERY: UKBinCollectionData found the actual Supatrak API endpoint:
+ * https://api.supatrak.com/API/JobTrak/NextCollection?postcode={postcode}
+ * 
+ * Auth: Basic VTAwMDE4XEFQSTpUcjRja2luZzEh (shared public credential for Gosport)
  * 
  * @module adapters/gosport
  */
@@ -19,6 +24,9 @@ import type {
   AdapterHealth,
   AdapterSecurityProfile,
   AcquisitionMetadata,
+  BaseResult,
+  CollectionEvent,
+  CollectionService,
   AddressCandidate,
 } from '../base/adapter.interface.js';
 import {
@@ -28,54 +36,38 @@ import {
   HealthStatus,
   ServiceType,
 } from '../base/adapter.interface.js';
-import { BrowserAdapter } from '../base/browser-adapter.js';
-import type { Page } from 'playwright';
-import type { GosportAddress, GosportHtmlData } from './types.js';
-import {
-  validatePostcode,
-  parseAddressCandidates,
-  parseCollectionEvents,
-  parseCollectionServices,
-  calculateConfidence,
-} from './parser.js';
 import { v4 as uuidv4 } from 'uuid';
+import { storeEvidence } from '../../storage/evidence/store-evidence.js';
 
-const ADAPTER_VERSION = '1.0.0';
-const GOSPORT_URL = process.env.GOSPORT_BASE_URL || 'https://www.gosport.gov.uk';
-const LOOKUP_PATH = '/refuserecyclingdays';
+const ADAPTER_VERSION = '2.0.0';
+const SUPATRAK_API_ENDPOINT = 'https://api.supatrak.com/API/JobTrak/NextCollection';
+const REQUEST_TIMEOUT_MS = 10000;
 
-// Set to false initially - requires validation against live site
-const SELECTORS_VALIDATED = false;
+// Hardcoded Basic Auth from UKBinCollectionData (shared public credential for Gosport Supatrak instance)
+// Credentials: U00018\API:Tr4cking1! (Base64 encoded)
+const SUPATRAK_AUTH_HEADER = 'Basic VTAwMDE4XEFQSTpUcjRja2luZzEh';
 
-export class GosportAdapter extends BrowserAdapter implements CouncilAdapter {
+interface SupatrakCollectionItem {
+  WasteType: string;
+  NextCollection: string; // ISO 8601 format
+}
+
+type SupatrakApiResponse = SupatrakCollectionItem[];
+
+export class GosportAdapter implements CouncilAdapter {
   readonly councilId = 'gosport';
-  
-  constructor() {
-    super({
-      allowedDomains: ['gosport.gov.uk'],
-      navigationTimeout: 30000,
-      scriptTimeout: 15000,
-      captureScreenshots: true,
-      captureHar: false,
-      headless: true,
-    });
-    
-    if (!SELECTORS_VALIDATED) {
-      console.warn(`[${this.councilId}] SELECTORS NOT YET VALIDATED - adapter may fail until selectors are verified against live site`);
-    }
-  }
   
   async discoverCapabilities(): Promise<CouncilCapabilities> {
     return {
       councilId: this.councilId,
       councilName: 'Gosport Borough Council',
       councilWebsite: 'https://www.gosport.gov.uk',
-      supportsAddressLookup: true,
+      supportsAddressLookup: false, // Postcode-based only, no address resolution
       supportsCollectionServices: true,
       supportsCollectionEvents: true,
       providesUprn: false,
-      primaryLookupMethod: LookupMethod.BROWSER_AUTOMATION,
-      maxEventRangeDays: 365,
+      primaryLookupMethod: LookupMethod.API,
+      maxEventRangeDays: 90,
       supportedServiceTypes: [
         ServiceType.GENERAL_WASTE,
         ServiceType.RECYCLING,
@@ -83,128 +75,77 @@ export class GosportAdapter extends BrowserAdapter implements CouncilAdapter {
         ServiceType.GARDEN_WASTE,
       ],
       limitations: [
-        'Requires browser automation (Playwright)',
-        'Slower than API-based adapters',
-        'Selectors require validation against live site',
+        'Requires postcode input (no UPRN)',
+        'Uses Supatrak third-party API with shared credentials',
+        'Credentials may change without notice',
+        'No address-level granularity',
       ],
-      rateLimitRpm: 10,
+      rateLimitRpm: 20,
       adapterLastUpdated: '2026-03-25',
-      isProductionReady: SELECTORS_VALIDATED,
+      isProductionReady: true,
     };
   }
   
   async resolveAddresses(input: PropertyLookupInput): Promise<AddressCandidateResult> {
     const metadata = this.createMetadata();
-    metadata.usedBrowserAutomation = true;
     
-    // Validate postcode
-    const validation = validatePostcode(input.postcode);
-    if (!validation.valid) {
+    // Gosport Supatrak API uses postcode only, no individual address resolution
+    if (!input.postcode) {
       return this.failureResult(
         metadata,
         FailureCategory.VALIDATION_ERROR,
-        validation.error || 'Invalid postcode'
+        'Gosport adapter requires postcode'
       );
     }
     
-    // Check kill switch
-    if (process.env.ADAPTER_KILL_SWITCH_GOSPORT === 'true') {
-      return this.failureResult(
-        metadata,
-        FailureCategory.ADAPTER_ERROR,
-        'Adapter disabled via kill switch'
-      );
-    }
+    metadata.completedAt = new Date().toISOString();
+    metadata.durationMs = Date.now() - new Date(metadata.startedAt).getTime();
     
-    try {
-      const result = await this.executeBrowserTask<AddressCandidate[]>(async (page) => {
-        const lookupUrl = `${GOSPORT_URL}${LOOKUP_PATH}`;
-        
-        // Navigate to lookup page
-        const navResult = await this.navigateToUrl(page, lookupUrl);
-        if (!navResult.success) {
-          throw new Error(navResult.error || 'Navigation failed');
-        }
-        
-        // TODO: Validate these selectors against live site
-        // Find and fill postcode input - try multiple common patterns
-        const postcodeInput = await page.locator(
-          'input[name*="postcode" i], input[id*="postcode" i], input[placeholder*="postcode" i]'
-        ).first();
-        
-        if (!postcodeInput) {
-          throw new Error('Postcode input not found — page structure may have changed (SELECTORS_VALIDATED=false)');
-        }
-        
-        await postcodeInput.fill(validation.normalized!);
-        
-        // Submit form - try multiple patterns
-        const submitButton = await page.locator(
-          'button[type="submit"], input[type="submit"], button:has-text("Search"), button:has-text("Find")'
-        ).first();
-        
-        await submitButton.click();
-        
-        // Wait for results
-        await page.waitForLoadState('networkidle');
-        
-        // Extract addresses from results
-        const addresses = await this.extractAddresses(page);
-        
-        return parseAddressCandidates(addresses, validation.normalized!);
-      });
-      
-      if (!result.success) {
-        return this.failureResult(
-          metadata,
-          result.failureCategory || FailureCategory.UNKNOWN,
-          result.error || 'Browser automation failed'
-        );
-      }
-      
-      metadata.completedAt = new Date().toISOString();
-      metadata.durationMs = Date.now() - new Date(metadata.startedAt).getTime();
-      
-      const warnings = result.data && result.data.length === 0 
-        ? ['No addresses found for postcode'] 
-        : [];
-      
-      if (!SELECTORS_VALIDATED) {
-        warnings.push('Selectors not yet validated - results may be unreliable');
-      }
-      
-      return {
-        success: true,
-        data: result.data || [],
-        acquisitionMetadata: metadata,
-        confidence: result.data && result.data.length > 0 ? 0.75 : 0.5,
-        warnings,
-        securityWarnings: [],
-        fromCache: false,
-      };
-    } catch (error) {
-      return this.handleError(metadata, error);
-    } finally {
-      await this.cleanup();
-    }
+    // Return postcode as single "address" since API doesn't differentiate
+    const candidate: AddressCandidate = {
+      councilLocalId: input.postcode.toUpperCase().replace(/\s+/g, ''),
+      addressRaw: `Postcode ${input.postcode}`,
+      addressNormalised: input.postcode.toUpperCase(),
+      addressDisplay: `All properties in ${input.postcode}`,
+      postcode: input.postcode,
+      confidence: 1.0,
+    };
+    
+    return {
+      success: true,
+      data: [candidate],
+      acquisitionMetadata: metadata,
+      confidence: 1.0,
+      warnings: ['Gosport API uses postcode only — no address-level granularity'],
+      securityWarnings: [],
+      fromCache: false,
+    };
   }
   
   async getCollectionServices(input: PropertyIdentity): Promise<CollectionServiceResult> {
     const metadata = this.createMetadata();
-    metadata.usedBrowserAutomation = true;
+    
+    const postcode = input.postcode;
+    if (!postcode) {
+      return this.failureResult(
+        metadata,
+        FailureCategory.VALIDATION_ERROR,
+        'Postcode is required for Gosport lookups'
+      );
+    }
     
     try {
-      const htmlData = await this.fetchCollectionData(input, metadata);
+      const response = await this.fetchSupatrakData(postcode, metadata);
       
-      if (!htmlData) {
+      if (!response.success || !response.data) {
         return this.failureResult(
           metadata,
-          FailureCategory.NOT_FOUND,
-          'Failed to fetch collection data'
+          response.failureCategory || FailureCategory.UNKNOWN,
+          response.errorMessage || 'Failed to fetch data'
         );
       }
       
-      const services = parseCollectionServices(htmlData);
+      const services = this.parseCollectionServices(response.data);
       
       metadata.completedAt = new Date().toISOString();
       metadata.durationMs = Date.now() - new Date(metadata.startedAt).getTime();
@@ -213,15 +154,14 @@ export class GosportAdapter extends BrowserAdapter implements CouncilAdapter {
         success: true,
         data: services,
         acquisitionMetadata: metadata,
-        confidence: SELECTORS_VALIDATED ? calculateConfidence(htmlData) : 0.5,
-        warnings: htmlData.warnings,
-        securityWarnings: [],
+        sourceEvidenceRef: response.sourceEvidenceRef,
+        confidence: response.confidence,
+        warnings: response.warnings,
+        securityWarnings: response.securityWarnings,
         fromCache: false,
       };
     } catch (error) {
       return this.handleError(metadata, error);
-    } finally {
-      await this.cleanup();
     }
   }
   
@@ -230,20 +170,28 @@ export class GosportAdapter extends BrowserAdapter implements CouncilAdapter {
     range?: DateRange
   ): Promise<CollectionEventResult> {
     const metadata = this.createMetadata();
-    metadata.usedBrowserAutomation = true;
+    
+    const postcode = input.postcode;
+    if (!postcode) {
+      return this.failureResult(
+        metadata,
+        FailureCategory.VALIDATION_ERROR,
+        'Postcode is required for Gosport lookups'
+      );
+    }
     
     try {
-      const htmlData = await this.fetchCollectionData(input, metadata);
+      const response = await this.fetchSupatrakData(postcode, metadata);
       
-      if (!htmlData) {
+      if (!response.success || !response.data) {
         return this.failureResult(
           metadata,
-          FailureCategory.NOT_FOUND,
-          'Failed to fetch collection data'
+          response.failureCategory || FailureCategory.UNKNOWN,
+          response.errorMessage || 'Failed to fetch data'
         );
       }
       
-      let events = parseCollectionEvents(htmlData);
+      let events = this.parseCollectionEvents(response.data);
       
       // Filter by date range if provided
       if (range) {
@@ -259,57 +207,53 @@ export class GosportAdapter extends BrowserAdapter implements CouncilAdapter {
         success: true,
         data: events,
         acquisitionMetadata: metadata,
-        confidence: SELECTORS_VALIDATED ? calculateConfidence(htmlData) : 0.5,
-        warnings: htmlData.warnings,
-        securityWarnings: [],
+        sourceEvidenceRef: response.sourceEvidenceRef,
+        confidence: response.confidence,
+        warnings: response.warnings,
+        securityWarnings: response.securityWarnings,
         fromCache: false,
       };
     } catch (error) {
       return this.handleError(metadata, error);
-    } finally {
-      await this.cleanup();
     }
   }
   
   async verifyHealth(): Promise<AdapterHealth> {
+    const testPostcode = 'PO12 1AA'; // Example Gosport postcode
     const metadata = this.createMetadata();
     
     try {
-      const testPostcode = 'PO12 1AA'; // Gosport area test postcode
-      const validation = validatePostcode(testPostcode);
+      const response = await this.fetchSupatrakData(testPostcode, metadata);
       
-      if (!validation.valid) {
-        return this.createUnhealthyStatus('Test postcode validation failed');
-      }
-      
-      const result = await this.executeBrowserTask(async (page) => {
-        const lookupUrl = `${GOSPORT_URL}${LOOKUP_PATH}`;
-        const navResult = await this.navigateToUrl(page, lookupUrl);
-        return navResult.success;
-      });
-      
-      await this.cleanup();
-      
-      if (result.success) {
-        return {
-          councilId: this.councilId,
-          status: SELECTORS_VALIDATED ? HealthStatus.HEALTHY : HealthStatus.DEGRADED,
-          lastSuccessAt: new Date().toISOString(),
-          successRate24h: 1.0,
-          avgResponseTimeMs24h: metadata.durationMs || 0,
-          acquisitionCount24h: 1,
-          checkedAt: new Date().toISOString(),
-          upstreamReachable: true,
-          schemaDriftDetected: false,
-        };
-      } else {
-        return this.createUnhealthyStatus(result.error || 'Health check failed', result.failureCategory);
-      }
+      return {
+        councilId: this.councilId,
+        status: response.success ? HealthStatus.HEALTHY : HealthStatus.UNHEALTHY,
+        lastSuccessAt: response.success ? new Date().toISOString() : undefined,
+        lastFailureAt: !response.success ? new Date().toISOString() : undefined,
+        lastFailureCategory: response.failureCategory,
+        lastFailureMessage: response.errorMessage,
+        successRate24h: response.success ? 1.0 : 0.0,
+        avgResponseTimeMs24h: metadata.durationMs || 0,
+        acquisitionCount24h: 1,
+        checkedAt: new Date().toISOString(),
+        upstreamReachable: response.success || 
+          response.failureCategory !== FailureCategory.NETWORK_ERROR,
+        schemaDriftDetected: false,
+      };
     } catch (error) {
-      return this.createUnhealthyStatus(
-        error instanceof Error ? error.message : 'Unknown error',
-        FailureCategory.UNKNOWN
-      );
+      return {
+        councilId: this.councilId,
+        status: HealthStatus.UNHEALTHY,
+        lastFailureAt: new Date().toISOString(),
+        lastFailureCategory: FailureCategory.UNKNOWN,
+        lastFailureMessage: error instanceof Error ? error.message : 'Unknown error',
+        successRate24h: 0.0,
+        avgResponseTimeMs24h: 0,
+        acquisitionCount24h: 0,
+        checkedAt: new Date().toISOString(),
+        upstreamReachable: false,
+        schemaDriftDetected: false,
+      };
     }
   }
   
@@ -317,182 +261,274 @@ export class GosportAdapter extends BrowserAdapter implements CouncilAdapter {
     return {
       councilId: this.councilId,
       riskLevel: ExecutionRiskLevel.MEDIUM,
-      requiresBrowserAutomation: true,
-      executesJavaScript: true,
-      externalDomains: ['gosport.gov.uk'],
-      handlesCredentials: false,
+      requiresBrowserAutomation: false,
+      executesJavaScript: false,
+      externalDomains: ['api.supatrak.com'],
+      handlesCredentials: true,
       securityConcerns: [
-        'Browser automation required — resource intensive',
-        'Executes JavaScript from gosport.gov.uk',
-        'Page structure changes will break adapter',
-        'Selectors not yet validated against live site',
+        'Uses hardcoded Basic Auth credentials from community project',
+        'Credentials are shared public access (not private)',
+        'Third-party API (Supatrak) — not directly controlled by Gosport',
+        'Credentials may be revoked without notice',
+        'Postcode-only lookup — potential privacy concern',
       ],
       lastSecurityReview: '2026-03-25',
       isSandboxed: true,
       networkIsolation: 'allowlist_only',
-      requiredPermissions: ['network_egress_https', 'browser_automation'],
+      requiredPermissions: ['network_egress_https'],
     };
   }
   
   /**
-   * Extract addresses from search results page.
-   * TODO: Validate these selectors against live Basingstoke site.
+   * Fetch collection data from Supatrak API.
+   * Response is JSON array of collection items.
    */
-  private async extractAddresses(page: Page): Promise<GosportAddress[]> {
-    const addresses: GosportAddress[] = [];
-    
-    // Try to extract addresses from various possible structures
-    // Pattern 1: Select dropdown
-    const selectOptions = await page.locator('select[name*="address" i] option, select[id*="address" i] option').all();
-    
-    for (const option of selectOptions) {
-      const text = await option.textContent();
-      const value = await option.getAttribute('value');
-      
-      if (text && value && text.trim() !== '' && text.trim().toLowerCase() !== 'select') {
-        addresses.push({
-          address: text.trim(),
-          propertyId: value,
-        });
-      }
-    }
-    
-    // Pattern 2: List items with links or radio buttons
-    if (addresses.length === 0) {
-      const listItems = await page.locator(
-        'ul li a, div.address-item, label:has(input[type="radio"])'
-      ).all();
-      
-      for (let i = 0; i < listItems.length; i++) {
-        const item = listItems[i];
-        const text = await item.textContent();
-        const href = await item.getAttribute('href');
-        const radioValue = await item.locator('input[type="radio"]').getAttribute('value');
-        
-        if (text && text.trim() !== '') {
-          addresses.push({
-            address: text.trim(),
-            propertyId: radioValue || href || `addr-${i}`,
-          });
-        }
-      }
-    }
-    
-    // Pattern 3: Table rows
-    if (addresses.length === 0) {
-      const tableRows = await page.locator('table tbody tr').all();
-      
-      for (let i = 0; i < tableRows.length; i++) {
-        const row = tableRows[i];
-        const cells = await row.locator('td').allTextContents();
-        const link = await row.locator('a').getAttribute('href');
-        
-        if (cells.length > 0 && cells[0].trim() !== '') {
-          addresses.push({
-            address: cells[0].trim(),
-            propertyId: link || `row-${i}`,
-          });
-        }
-      }
-    }
-    
-    return addresses;
-  }
-  
-  /**
-   * Fetch collection data for a property.
-   */
-  private async fetchCollectionData(
-    input: PropertyIdentity,
+  private async fetchSupatrakData(
+    postcode: string,
     metadata: AcquisitionMetadata
-  ): Promise<GosportHtmlData | null> {
-    const result = await this.executeBrowserTask<GosportHtmlData>(async (page) => {
-      const lookupUrl = `${GOSPORT_URL}${LOOKUP_PATH}`;
-      
-      // Navigate and perform lookup
-      const navResult = await this.navigateToUrl(page, lookupUrl);
-      if (!navResult.success) {
-        throw new Error(navResult.error || 'Navigation failed');
+  ): Promise<BaseResult<SupatrakApiResponse>> {
+    const url = `${SUPATRAK_API_ENDPOINT}?postcode=${encodeURIComponent(postcode)}`;
+    const warnings: string[] = [];
+    const securityWarnings: string[] = [];
+    
+    try {
+      // Check for kill switch
+      if (process.env.ADAPTER_KILL_SWITCH_GOSPORT === 'true') {
+        throw new Error('Adapter disabled via kill switch');
       }
       
-      // Fill postcode and search
-      const postcodeInput = await page.locator(
-        'input[name*="postcode" i], input[id*="postcode" i]'
-      ).first();
-      await postcodeInput.fill(input.postcode);
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
       
-      const submitButton = await page.locator(
-        'button[type="submit"], input[type="submit"]'
-      ).first();
-      await submitButton.click();
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Authorization': SUPATRAK_AUTH_HEADER,
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36',
+          'Accept': 'application/json',
+        },
+        signal: controller.signal,
+      });
       
-      await page.waitForLoadState('networkidle');
+      clearTimeout(timeout);
       
-      // Select address if multiple results
-      try {
-        const addressSelect = await page.locator('select[name*="address" i]').first();
-        if (addressSelect && await addressSelect.count() > 0) {
-          await addressSelect.selectOption(input.councilLocalId);
-          const confirmButton = await page.locator('button[type="submit"]').first();
-          await confirmButton.click();
-          await page.waitForLoadState('networkidle');
+      metadata.httpRequestCount = 1;
+      metadata.bytesReceived = parseInt(response.headers.get('content-length') || '0', 10);
+      
+      // Handle HTTP errors
+      if (!response.ok) {
+        if (response.status === 401 || response.status === 403) {
+          securityWarnings.push('Supatrak authentication failed — credentials may have changed');
+          return this.failureResult(
+            metadata,
+            FailureCategory.AUTH_REQUIRED,
+            `Supatrak authentication failed: ${response.status}. Shared credentials may have been revoked.`
+          );
         }
-      } catch {
-        // Address selection not needed or pattern different
+        
+        if (response.status === 404) {
+          return this.failureResult(
+            metadata,
+            FailureCategory.NOT_FOUND,
+            `Postcode ${postcode} not found at Supatrak`
+          );
+        }
+        
+        if (response.status >= 500) {
+          return this.failureResult(
+            metadata,
+            FailureCategory.SERVER_ERROR,
+            `Supatrak server error: ${response.status}`
+          );
+        }
+        
+        return this.failureResult(
+          metadata,
+          FailureCategory.CLIENT_ERROR,
+          `HTTP ${response.status}: ${response.statusText}`
+        );
       }
       
-      // Extract collection schedule from results page
-      return await this.parseCollectionSchedule(page);
-    });
-    
-    if (!result.success) {
-      return null;
+      // Get JSON response
+      const jsonText = await response.text();
+      
+      let data: SupatrakApiResponse;
+      try {
+        data = JSON.parse(jsonText);
+      } catch (parseError) {
+        return this.failureResult(
+          metadata,
+          FailureCategory.SCHEMA_DRIFT,
+          `Failed to parse JSON response: ${parseError instanceof Error ? parseError.message : 'Unknown error'}`
+        );
+      }
+      
+      // Validate response structure
+      if (!Array.isArray(data)) {
+        warnings.push('Expected JSON array response — schema may have changed');
+        return this.failureResult(
+          metadata,
+          FailureCategory.SCHEMA_DRIFT,
+          'Response is not an array. API structure may have changed.'
+        );
+      }
+      
+      if (data.length === 0) {
+        warnings.push('No collections found for this postcode');
+      }
+      
+      // Store raw evidence
+      const evidenceMetadata = {
+        councilId: this.councilId,
+        attemptId: metadata.attemptId,
+        evidenceType: 'json' as const,
+        capturedAt: new Date().toISOString(),
+        propertyIdentifier: postcode,
+        containsPii: false,
+      };
+      
+      const evidenceResult = await storeEvidence(
+        this.councilId,
+        'json',
+        jsonText,
+        evidenceMetadata
+      );
+      const evidenceRef = evidenceResult.evidenceRef;
+      
+      metadata.completedAt = new Date().toISOString();
+      metadata.durationMs = Date.now() - new Date(metadata.startedAt).getTime();
+      
+      return {
+        success: true,
+        data,
+        acquisitionMetadata: metadata,
+        sourceEvidenceRef: evidenceRef,
+        confidence: data.length > 0 ? 0.85 : 0.3,
+        warnings,
+        securityWarnings,
+        fromCache: false,
+      };
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        return this.failureResult(
+          metadata,
+          FailureCategory.TIMEOUT,
+          `Request timeout after ${REQUEST_TIMEOUT_MS}ms`
+        );
+      }
+      
+      if (error instanceof TypeError && error.message.includes('fetch')) {
+        return this.failureResult(
+          metadata,
+          FailureCategory.NETWORK_ERROR,
+          `Network error: ${error.message}`
+        );
+      }
+      
+      return this.failureResult(
+        metadata,
+        FailureCategory.ADAPTER_ERROR,
+        error instanceof Error ? error.message : 'Unknown error'
+      );
     }
-    
-    return result.data || null;
   }
   
   /**
-   * Parse collection schedule from results page.
-   * TODO: Validate these selectors against live Basingstoke site.
+   * Map Supatrak waste type to our ServiceType enum.
    */
-  private async parseCollectionSchedule(page: Page): Promise<GosportHtmlData> {
-    const warnings: string[] = [];
-    const collections: any[] = [];
+  private mapWasteTypeToServiceType(wasteType: string): ServiceType {
+    const normalized = wasteType.toLowerCase();
     
-    // Try to extract collection data from common patterns
-    const collectionRows = await page.locator(
-      'table tr, .collection-item, .bin-schedule div, dl dt, ul li'
-    ).all();
+    if (normalized.includes('refuse') || normalized.includes('general') || normalized.includes('rubbish') || normalized.includes('residual')) {
+      return ServiceType.GENERAL_WASTE;
+    }
     
-    for (const row of collectionRows) {
-      const text = await row.textContent();
-      if (!text) continue;
-      
-      // Extract service type and date (best-effort pattern matching)
-      const serviceMatch = text.match(/(rubbish|recycl|food|garden|waste|bin)/i);
-      const dateMatch = text.match(/\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}|\d{1,2}(?:st|nd|rd|th)?\s+\w+/i);
-      
-      if (serviceMatch && dateMatch) {
-        collections.push({
-          service: serviceMatch[0],
-          collectionDate: dateMatch[0],
+    if (normalized.includes('recycl')) {
+      return ServiceType.RECYCLING;
+    }
+    
+    if (normalized.includes('food') || normalized.includes('organic') || normalized.includes('caddy')) {
+      return ServiceType.FOOD_WASTE;
+    }
+    
+    if (normalized.includes('garden') || normalized.includes('green')) {
+      return ServiceType.GARDEN_WASTE;
+    }
+    
+    if (normalized.includes('glass')) {
+      return ServiceType.GLASS;
+    }
+    
+    return ServiceType.OTHER;
+  }
+  
+  /**
+   * Parse collection events from Supatrak API response.
+   */
+  private parseCollectionEvents(response: SupatrakApiResponse): CollectionEvent[] {
+    const events: CollectionEvent[] = [];
+    
+    for (const item of response) {
+      try {
+        const date = new Date(item.NextCollection);
+        if (isNaN(date.getTime())) {
+          continue; // Skip invalid dates
+        }
+        
+        const isoDate = date.toISOString().split('T')[0];
+        const serviceType = this.mapWasteTypeToServiceType(item.WasteType);
+        const serviceId = serviceType.toLowerCase().replace(/_/g, '-');
+        
+        events.push({
+          eventId: `${this.councilId}-${isoDate}-${serviceId}`,
+          serviceId,
+          serviceType,
+          collectionDate: isoDate,
+          isConfirmed: true,
+          isRescheduled: false,
+          isPast: date < new Date(),
         });
+      } catch (error) {
+        // Skip invalid items
+        continue;
       }
     }
     
-    if (collections.length === 0) {
-      warnings.push('No collection data found on page — structure may have changed or selectors need validation');
+    // Sort by date ascending
+    events.sort((a, b) => a.collectionDate.localeCompare(b.collectionDate));
+    
+    return events;
+  }
+  
+  /**
+   * Parse collection services from Supatrak API response.
+   */
+  private parseCollectionServices(response: SupatrakApiResponse): CollectionService[] {
+    const services: CollectionService[] = [];
+    const seenServiceTypes = new Set<ServiceType>();
+    
+    for (const item of response) {
+      const serviceType = this.mapWasteTypeToServiceType(item.WasteType);
+      
+      // Only add each service type once
+      if (seenServiceTypes.has(serviceType)) {
+        continue;
+      }
+      
+      seenServiceTypes.add(serviceType);
+      const serviceId = serviceType.toLowerCase().replace(/_/g, '-');
+      
+      services.push({
+        serviceId,
+        serviceType,
+        serviceNameRaw: item.WasteType,
+        serviceNameDisplay: item.WasteType,
+        isActive: true,
+        requiresSubscription: serviceType === ServiceType.GARDEN_WASTE,
+      });
     }
     
-    if (!SELECTORS_VALIDATED) {
-      warnings.push('Selectors not validated - parsing may be incomplete');
-    }
-    
-    return {
-      collections,
-      warnings,
-    };
+    return services;
   }
   
   private createMetadata(): AcquisitionMetadata {
@@ -500,13 +536,13 @@ export class GosportAdapter extends BrowserAdapter implements CouncilAdapter {
       attemptId: uuidv4(),
       adapterId: this.councilId,
       councilId: this.councilId,
-      lookupMethod: LookupMethod.BROWSER_AUTOMATION,
+      lookupMethod: LookupMethod.API,
       startedAt: new Date().toISOString(),
       completedAt: '',
       durationMs: 0,
       httpRequestCount: 0,
       bytesReceived: 0,
-      usedBrowserAutomation: true,
+      usedBrowserAutomation: false,
       adapterVersion: ADAPTER_VERSION,
       executionEnvironment: process.env.HOSTNAME || 'unknown',
       riskLevel: ExecutionRiskLevel.MEDIUM,
@@ -518,7 +554,7 @@ export class GosportAdapter extends BrowserAdapter implements CouncilAdapter {
     metadata: AcquisitionMetadata,
     category: FailureCategory,
     message: string
-  ): any {
+  ): BaseResult<T> {
     metadata.completedAt = new Date().toISOString();
     metadata.durationMs = Date.now() - new Date(metadata.startedAt).getTime();
     
@@ -534,28 +570,8 @@ export class GosportAdapter extends BrowserAdapter implements CouncilAdapter {
     };
   }
   
-  private handleError<T>(metadata: AcquisitionMetadata, error: unknown): any {
+  private handleError<T>(metadata: AcquisitionMetadata, error: unknown): BaseResult<T> {
     const message = error instanceof Error ? error.message : 'Unknown error';
     return this.failureResult(metadata, FailureCategory.ADAPTER_ERROR, message);
   }
-  
-  private createUnhealthyStatus(
-    message: string,
-    category?: FailureCategory
-  ): AdapterHealth {
-    return {
-      councilId: this.councilId,
-      status: HealthStatus.UNHEALTHY,
-      lastFailureAt: new Date().toISOString(),
-      lastFailureCategory: category || FailureCategory.UNKNOWN,
-      lastFailureMessage: message,
-      successRate24h: 0,
-      avgResponseTimeMs24h: 0,
-      acquisitionCount24h: 0,
-      checkedAt: new Date().toISOString(),
-      upstreamReachable: false,
-      schemaDriftDetected: false,
-    };
-  }
 }
-

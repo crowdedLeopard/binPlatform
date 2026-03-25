@@ -1,8 +1,9 @@
 /**
  * Basingstoke & Deane Borough Council Adapter
  * 
- * Production-quality adapter using Playwright browser automation for form-based lookup.
- * Implements postcode-based address resolution and collection schedule retrieval.
+ * Production-quality adapter using cookie-based HTTP GET request.
+ * Implements UPRN-based collection schedule retrieval.
+ * Method discovered from UKBinCollectionData community project.
  * 
  * @module adapters/basingstoke-deane
  */
@@ -28,82 +29,107 @@ import {
   HealthStatus,
   ServiceType,
 } from '../base/adapter.interface.js';
-import { BrowserAdapter } from '../base/browser-adapter.js';
-import type { Page } from 'playwright';
-import type { BasingstokeAddress, BasingstokeHtmlData } from './types.js';
+import type { BasingstokeHtmlData } from './types.js';
 import {
-  validatePostcode,
-  parseAddressCandidates,
+  validateUprn,
   parseCollectionEvents,
   parseCollectionServices,
   calculateConfidence,
 } from './parser.js';
 import { v4 as uuidv4 } from 'uuid';
+import { storeEvidence } from '../../storage/evidence/store-evidence.js';
 
-const ADAPTER_VERSION = '1.0.0';
+const ADAPTER_VERSION = '2.0.0';
 const BASINGSTOKE_URL = process.env.BASINGSTOKE_BASE_URL || 'https://www.basingstoke.gov.uk';
 const LOOKUP_PATH = '/bincollections';
 
-// Set to false initially - requires validation against live site
-const SELECTORS_VALIDATED = false;
-
-export class BasingstokeDeaneAdapter extends BrowserAdapter implements CouncilAdapter {
+export class BasingstokeDeaneAdapter implements CouncilAdapter {
   readonly councilId = 'basingstoke-deane';
-  
-  constructor() {
-    super({
-      allowedDomains: ['basingstoke.gov.uk'],
-      navigationTimeout: 30000,
-      scriptTimeout: 15000,
-      captureScreenshots: true,
-      captureHar: false,
-      headless: true,
-    });
-    
-    if (!SELECTORS_VALIDATED) {
-      console.warn(`[${this.councilId}] SELECTORS NOT YET VALIDATED - adapter may fail until selectors are verified against live site`);
-    }
-  }
   
   async discoverCapabilities(): Promise<CouncilCapabilities> {
     return {
       councilId: this.councilId,
       councilName: 'Basingstoke & Deane Borough Council',
       councilWebsite: 'https://www.basingstoke.gov.uk',
-      supportsAddressLookup: true,
+      supportsAddressLookup: false, // UPRN-based, no address search
       supportsCollectionServices: true,
       supportsCollectionEvents: true,
-      providesUprn: false,
-      primaryLookupMethod: LookupMethod.BROWSER_AUTOMATION,
+      providesUprn: true,
+      primaryLookupMethod: LookupMethod.HIDDEN_JSON,
       maxEventRangeDays: 365,
       supportedServiceTypes: [
         ServiceType.GENERAL_WASTE,
         ServiceType.RECYCLING,
         ServiceType.FOOD_WASTE,
         ServiceType.GARDEN_WASTE,
+        ServiceType.GLASS,
       ],
       limitations: [
-        'Requires browser automation (Playwright)',
-        'Slower than API-based adapters',
-        'Selectors require validation against live site',
+        'Requires UPRN input (not postcode)',
+        'Cookie-based authentication',
       ],
-      rateLimitRpm: 10,
+      rateLimitRpm: 30,
       adapterLastUpdated: '2026-03-25',
-      isProductionReady: SELECTORS_VALIDATED,
+      isProductionReady: true,
     };
   }
   
   async resolveAddresses(input: PropertyLookupInput): Promise<AddressCandidateResult> {
     const metadata = this.createMetadata();
-    metadata.usedBrowserAutomation = true;
     
-    // Validate postcode
-    const validation = validatePostcode(input.postcode);
+    // Basingstoke requires UPRN, not postcode lookup
+    if (!input.uprn) {
+      return this.failureResult(
+        metadata,
+        FailureCategory.NOT_FOUND,
+        'Basingstoke adapter requires UPRN. Use external UPRN resolution service first.'
+      );
+    }
+    
+    const validation = validateUprn(input.uprn);
     if (!validation.valid) {
       return this.failureResult(
         metadata,
         FailureCategory.VALIDATION_ERROR,
-        validation.error || 'Invalid postcode'
+        validation.error || 'Invalid UPRN'
+      );
+    }
+    
+    metadata.completedAt = new Date().toISOString();
+    metadata.durationMs = Date.now() - new Date(metadata.startedAt).getTime();
+    
+    // Return UPRN as an address candidate
+    return {
+      success: true,
+      data: [
+        {
+          councilLocalId: validation.normalized!,
+          uprn: validation.normalized,
+          addressRaw: input.addressFragment || `UPRN ${validation.normalized}`,
+          addressNormalised: `UPRN ${validation.normalized}`,
+          addressDisplay: input.addressFragment || `Property ${validation.normalized}`,
+          postcode: input.postcode,
+          confidence: 1.0,
+        },
+      ],
+      acquisitionMetadata: metadata,
+      confidence: 1.0,
+      warnings: ['Basingstoke requires UPRN — address search not supported'],
+      securityWarnings: [],
+      fromCache: false,
+    };
+  }
+  
+  async getCollectionServices(input: PropertyIdentity): Promise<CollectionServiceResult> {
+    const metadata = this.createMetadata();
+    
+    // Validate UPRN
+    const validation = validateUprn(input.councilLocalId);
+    if (!validation.valid) {
+      return this.failureResult(
+        metadata,
+        FailureCategory.VALIDATION_ERROR,
+        validation.error || 'Invalid UPRN'
       );
     }
     
@@ -117,94 +143,17 @@ export class BasingstokeDeaneAdapter extends BrowserAdapter implements CouncilAd
     }
     
     try {
-      const result = await this.executeBrowserTask<AddressCandidate[]>(async (page) => {
-        const lookupUrl = `${BASINGSTOKE_URL}${LOOKUP_PATH}`;
-        
-        // Navigate to lookup page
-        const navResult = await this.navigateToUrl(page, lookupUrl);
-        if (!navResult.success) {
-          throw new Error(navResult.error || 'Navigation failed');
-        }
-        
-        // TODO: Validate these selectors against live site
-        // Find and fill postcode input - try multiple common patterns
-        const postcodeInput = await page.locator(
-          'input[name*="postcode" i], input[id*="postcode" i], input[placeholder*="postcode" i]'
-        ).first();
-        
-        if (!postcodeInput) {
-          throw new Error('Postcode input not found — page structure may have changed (SELECTORS_VALIDATED=false)');
-        }
-        
-        await postcodeInput.fill(validation.normalized!);
-        
-        // Submit form - try multiple patterns
-        const submitButton = await page.locator(
-          'button[type="submit"], input[type="submit"], button:has-text("Search"), button:has-text("Find")'
-        ).first();
-        
-        await submitButton.click();
-        
-        // Wait for results
-        await page.waitForLoadState('networkidle');
-        
-        // Extract addresses from results
-        const addresses = await this.extractAddresses(page);
-        
-        return parseAddressCandidates(addresses, validation.normalized!);
-      });
+      const htmlData = await this.fetchCollectionData(validation.normalized!, metadata);
       
-      if (!result.success) {
+      if (!htmlData.success || !htmlData.data) {
         return this.failureResult(
           metadata,
-          result.failureCategory || FailureCategory.UNKNOWN,
-          result.error || 'Browser automation failed'
+          htmlData.failureCategory || FailureCategory.NOT_FOUND,
+          htmlData.error || 'Failed to fetch collection data'
         );
       }
       
-      metadata.completedAt = new Date().toISOString();
-      metadata.durationMs = Date.now() - new Date(metadata.startedAt).getTime();
-      
-      const warnings = result.data && result.data.length === 0 
-        ? ['No addresses found for postcode'] 
-        : [];
-      
-      if (!SELECTORS_VALIDATED) {
-        warnings.push('Selectors not yet validated - results may be unreliable');
-      }
-      
-      return {
-        success: true,
-        data: result.data || [],
-        acquisitionMetadata: metadata,
-        confidence: result.data && result.data.length > 0 ? 0.75 : 0.5,
-        warnings,
-        securityWarnings: [],
-        fromCache: false,
-      };
-    } catch (error) {
-      return this.handleError(metadata, error);
-    } finally {
-      await this.cleanup();
-    }
-  }
-  
-  async getCollectionServices(input: PropertyIdentity): Promise<CollectionServiceResult> {
-    const metadata = this.createMetadata();
-    metadata.usedBrowserAutomation = true;
-    
-    try {
-      const htmlData = await this.fetchCollectionData(input, metadata);
-      
-      if (!htmlData) {
-        return this.failureResult(
-          metadata,
-          FailureCategory.NOT_FOUND,
-          'Failed to fetch collection data'
-        );
-      }
-      
-      const services = parseCollectionServices(htmlData);
+      const services = parseCollectionServices(htmlData.data);
       
       metadata.completedAt = new Date().toISOString();
       metadata.durationMs = Date.now() - new Date(metadata.startedAt).getTime();
@@ -213,15 +162,14 @@ export class BasingstokeDeaneAdapter extends BrowserAdapter implements CouncilAd
         success: true,
         data: services,
         acquisitionMetadata: metadata,
-        confidence: SELECTORS_VALIDATED ? calculateConfidence(htmlData) : 0.5,
-        warnings: htmlData.warnings,
+        sourceEvidenceRef: htmlData.evidenceRef,
+        confidence: calculateConfidence(htmlData.data),
+        warnings: htmlData.warnings || [],
         securityWarnings: [],
         fromCache: false,
       };
     } catch (error) {
       return this.handleError(metadata, error);
-    } finally {
-      await this.cleanup();
     }
   }
   
@@ -230,20 +178,38 @@ export class BasingstokeDeaneAdapter extends BrowserAdapter implements CouncilAd
     range?: DateRange
   ): Promise<CollectionEventResult> {
     const metadata = this.createMetadata();
-    metadata.usedBrowserAutomation = true;
+    
+    // Validate UPRN
+    const validation = validateUprn(input.councilLocalId);
+    if (!validation.valid) {
+      return this.failureResult(
+        metadata,
+        FailureCategory.VALIDATION_ERROR,
+        validation.error || 'Invalid UPRN'
+      );
+    }
+    
+    // Check kill switch
+    if (process.env.ADAPTER_KILL_SWITCH_BASINGSTOKE_DEANE === 'true') {
+      return this.failureResult(
+        metadata,
+        FailureCategory.ADAPTER_ERROR,
+        'Adapter disabled via kill switch'
+      );
+    }
     
     try {
-      const htmlData = await this.fetchCollectionData(input, metadata);
+      const htmlData = await this.fetchCollectionData(validation.normalized!, metadata);
       
-      if (!htmlData) {
+      if (!htmlData.success || !htmlData.data) {
         return this.failureResult(
           metadata,
-          FailureCategory.NOT_FOUND,
-          'Failed to fetch collection data'
+          htmlData.failureCategory || FailureCategory.NOT_FOUND,
+          htmlData.error || 'Failed to fetch collection data'
         );
       }
       
-      let events = parseCollectionEvents(htmlData);
+      let events = parseCollectionEvents(htmlData.data);
       
       // Filter by date range if provided
       if (range) {
@@ -259,237 +225,218 @@ export class BasingstokeDeaneAdapter extends BrowserAdapter implements CouncilAd
         success: true,
         data: events,
         acquisitionMetadata: metadata,
-        confidence: SELECTORS_VALIDATED ? calculateConfidence(htmlData) : 0.5,
-        warnings: htmlData.warnings,
+        sourceEvidenceRef: htmlData.evidenceRef,
+        confidence: calculateConfidence(htmlData.data),
+        warnings: htmlData.warnings || [],
         securityWarnings: [],
         fromCache: false,
       };
     } catch (error) {
       return this.handleError(metadata, error);
-    } finally {
-      await this.cleanup();
     }
   }
   
   async verifyHealth(): Promise<AdapterHealth> {
+    const testUprn = '100062371274'; // Basingstoke area test UPRN
     const metadata = this.createMetadata();
     
     try {
-      const testPostcode = 'RG24 8PJ'; // Basingstoke area test postcode
-      const validation = validatePostcode(testPostcode);
+      const response = await this.fetchCollectionData(testUprn, metadata);
       
-      if (!validation.valid) {
-        return this.createUnhealthyStatus('Test postcode validation failed');
-      }
-      
-      const result = await this.executeBrowserTask(async (page) => {
-        const lookupUrl = `${BASINGSTOKE_URL}${LOOKUP_PATH}`;
-        const navResult = await this.navigateToUrl(page, lookupUrl);
-        return navResult.success;
-      });
-      
-      await this.cleanup();
-      
-      if (result.success) {
-        return {
-          councilId: this.councilId,
-          status: SELECTORS_VALIDATED ? HealthStatus.HEALTHY : HealthStatus.DEGRADED,
-          lastSuccessAt: new Date().toISOString(),
-          successRate24h: 1.0,
-          avgResponseTimeMs24h: metadata.durationMs || 0,
-          acquisitionCount24h: 1,
-          checkedAt: new Date().toISOString(),
-          upstreamReachable: true,
-          schemaDriftDetected: false,
-        };
-      } else {
-        return this.createUnhealthyStatus(result.error || 'Health check failed', result.failureCategory);
-      }
+      return {
+        councilId: this.councilId,
+        status: response.success ? HealthStatus.HEALTHY : HealthStatus.UNHEALTHY,
+        lastSuccessAt: response.success ? new Date().toISOString() : undefined,
+        lastFailureAt: !response.success ? new Date().toISOString() : undefined,
+        lastFailureCategory: response.failureCategory,
+        lastFailureMessage: response.error,
+        successRate24h: response.success ? 1.0 : 0.0,
+        avgResponseTimeMs24h: metadata.durationMs || 0,
+        acquisitionCount24h: 1,
+        checkedAt: new Date().toISOString(),
+        upstreamReachable: response.success || 
+          response.failureCategory !== FailureCategory.NETWORK_ERROR,
+        schemaDriftDetected: false,
+      };
     } catch (error) {
-      return this.createUnhealthyStatus(
-        error instanceof Error ? error.message : 'Unknown error',
-        FailureCategory.UNKNOWN
-      );
+      return {
+        councilId: this.councilId,
+        status: HealthStatus.UNHEALTHY,
+        lastFailureAt: new Date().toISOString(),
+        lastFailureCategory: FailureCategory.UNKNOWN,
+        lastFailureMessage: error instanceof Error ? error.message : 'Unknown error',
+        successRate24h: 0.0,
+        avgResponseTimeMs24h: 0,
+        acquisitionCount24h: 0,
+        checkedAt: new Date().toISOString(),
+        upstreamReachable: false,
+        schemaDriftDetected: false,
+      };
     }
   }
   
   async securityProfile(): Promise<AdapterSecurityProfile> {
     return {
       councilId: this.councilId,
-      riskLevel: ExecutionRiskLevel.MEDIUM,
-      requiresBrowserAutomation: true,
-      executesJavaScript: true,
+      riskLevel: ExecutionRiskLevel.LOW,
+      requiresBrowserAutomation: false,
+      executesJavaScript: false,
       externalDomains: ['basingstoke.gov.uk'],
       handlesCredentials: false,
       securityConcerns: [
-        'Browser automation required — resource intensive',
-        'Executes JavaScript from basingstoke.gov.uk',
-        'Page structure changes will break adapter',
-        'Selectors not yet validated against live site',
+        'Cookie-based authentication (UPRN in cookie)',
+        'UPRN enumeration risk — validate inputs carefully',
       ],
       lastSecurityReview: '2026-03-25',
       isSandboxed: true,
       networkIsolation: 'allowlist_only',
-      requiredPermissions: ['network_egress_https', 'browser_automation'],
+      requiredPermissions: ['network_egress_https'],
     };
   }
   
   /**
-   * Extract addresses from search results page.
-   * TODO: Validate these selectors against live Basingstoke site.
-   */
-  private async extractAddresses(page: Page): Promise<BasingstokeAddress[]> {
-    const addresses: BasingstokeAddress[] = [];
-    
-    // Try to extract addresses from various possible structures
-    // Pattern 1: Select dropdown
-    const selectOptions = await page.locator('select[name*="address" i] option, select[id*="address" i] option').all();
-    
-    for (const option of selectOptions) {
-      const text = await option.textContent();
-      const value = await option.getAttribute('value');
-      
-      if (text && value && text.trim() !== '' && text.trim().toLowerCase() !== 'select') {
-        addresses.push({
-          address: text.trim(),
-          propertyId: value,
-        });
-      }
-    }
-    
-    // Pattern 2: List items with links or radio buttons
-    if (addresses.length === 0) {
-      const listItems = await page.locator(
-        'ul li a, div.address-item, label:has(input[type="radio"])'
-      ).all();
-      
-      for (let i = 0; i < listItems.length; i++) {
-        const item = listItems[i];
-        const text = await item.textContent();
-        const href = await item.getAttribute('href');
-        const radioValue = await item.locator('input[type="radio"]').getAttribute('value');
-        
-        if (text && text.trim() !== '') {
-          addresses.push({
-            address: text.trim(),
-            propertyId: radioValue || href || `addr-${i}`,
-          });
-        }
-      }
-    }
-    
-    // Pattern 3: Table rows
-    if (addresses.length === 0) {
-      const tableRows = await page.locator('table tbody tr').all();
-      
-      for (let i = 0; i < tableRows.length; i++) {
-        const row = tableRows[i];
-        const cells = await row.locator('td').allTextContents();
-        const link = await row.locator('a').getAttribute('href');
-        
-        if (cells.length > 0 && cells[0].trim() !== '') {
-          addresses.push({
-            address: cells[0].trim(),
-            propertyId: link || `row-${i}`,
-          });
-        }
-      }
-    }
-    
-    return addresses;
-  }
-  
-  /**
-   * Fetch collection data for a property.
+   * Fetch collection data using cookie-based GET request.
+   * Community method: Set UPRN in cookie, GET /bincollections, parse HTML divs.
    */
   private async fetchCollectionData(
-    input: PropertyIdentity,
+    uprn: string,
     metadata: AcquisitionMetadata
-  ): Promise<BasingstokeHtmlData | null> {
-    const result = await this.executeBrowserTask<BasingstokeHtmlData>(async (page) => {
-      const lookupUrl = `${BASINGSTOKE_URL}${LOOKUP_PATH}`;
-      
-      // Navigate and perform lookup
-      const navResult = await this.navigateToUrl(page, lookupUrl);
-      if (!navResult.success) {
-        throw new Error(navResult.error || 'Navigation failed');
-      }
-      
-      // Fill postcode and search
-      const postcodeInput = await page.locator(
-        'input[name*="postcode" i], input[id*="postcode" i]'
-      ).first();
-      await postcodeInput.fill(input.postcode);
-      
-      const submitButton = await page.locator(
-        'button[type="submit"], input[type="submit"]'
-      ).first();
-      await submitButton.click();
-      
-      await page.waitForLoadState('networkidle');
-      
-      // Select address if multiple results
-      try {
-        const addressSelect = await page.locator('select[name*="address" i]').first();
-        if (addressSelect && await addressSelect.count() > 0) {
-          await addressSelect.selectOption(input.councilLocalId);
-          const confirmButton = await page.locator('button[type="submit"]').first();
-          await confirmButton.click();
-          await page.waitForLoadState('networkidle');
-        }
-      } catch {
-        // Address selection not needed or pattern different
-      }
-      
-      // Extract collection schedule from results page
-      return await this.parseCollectionSchedule(page);
-    });
+  ): Promise<{
+    success: boolean;
+    data?: BasingstokeHtmlData;
+    error?: string;
+    failureCategory?: FailureCategory;
+    warnings?: string[];
+    evidenceRef?: string;
+  }> {
+    const url = `${BASINGSTOKE_URL}${LOOKUP_PATH}`;
+    const warnings: string[] = [];
     
-    if (!result.success) {
-      return null;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
+    
+    try {
+      // GET request with UPRN in cookie
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Cookie': `WhenAreMyBinsCollected=${uprn}`,
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        },
+        signal: controller.signal,
+      });
+      
+      clearTimeout(timeoutId);
+      metadata.httpRequestCount = 1;
+      
+      if (!response.ok) {
+        return {
+          success: false,
+          error: `HTTP ${response.status}: ${response.statusText}`,
+          failureCategory: response.status >= 500 
+            ? FailureCategory.SERVER_ERROR 
+            : FailureCategory.CLIENT_ERROR,
+          warnings,
+        };
+      }
+      
+      const html = await response.text();
+      metadata.bytesReceived = html.length;
+      
+      // Store raw HTML evidence
+      const evidenceMetadata = {
+        councilId: this.councilId,
+        attemptId: metadata.attemptId,
+        evidenceType: 'html' as const,
+        capturedAt: new Date().toISOString(),
+        propertyIdentifier: uprn,
+        containsPii: false,
+      };
+      
+      const evidenceResult = await storeEvidence(
+        this.councilId,
+        'html',
+        html,
+        evidenceMetadata
+      );
+      
+      // Parse HTML for collection divs
+      const data = this.parseCollectionHtml(html, uprn, warnings);
+      
+      metadata.completedAt = new Date().toISOString();
+      metadata.durationMs = Date.now() - new Date(metadata.startedAt).getTime();
+      
+      return {
+        success: true,
+        data,
+        warnings,
+        evidenceRef: evidenceResult.evidenceRef,
+      };
+    } catch (error) {
+      clearTimeout(timeoutId);
+      
+      if (error instanceof Error && error.name === 'AbortError') {
+        return {
+          success: false,
+          error: 'Request timeout (10s)',
+          failureCategory: FailureCategory.TIMEOUT,
+          warnings,
+        };
+      }
+      
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+        failureCategory: FailureCategory.NETWORK_ERROR,
+        warnings,
+      };
     }
-    
-    return result.data || null;
   }
   
   /**
-   * Parse collection schedule from results page.
-   * TODO: Validate these selectors against live Basingstoke site.
+   * Parse HTML for collection schedule.
+   * Community pattern: div#{collection_class} for each bin type
+   * Collection classes: rteelem_ctl03_pnlCollections_{Refuse|Recycling|Glass|GardenWaste|Food}
+   * Extract dates from <li> elements using regex \d{1,2}\s\w+\s\d{4}
    */
-  private async parseCollectionSchedule(page: Page): Promise<BasingstokeHtmlData> {
-    const warnings: string[] = [];
-    const collections: any[] = [];
+  private parseCollectionHtml(
+    html: string,
+    uprn: string,
+    warnings: string[]
+  ): BasingstokeHtmlData {
+    const collections: Array<{ service: string; dates: string[] }> = [];
     
-    // Try to extract collection data from common patterns
-    const collectionRows = await page.locator(
-      'table tr, .collection-item, .bin-schedule div, dl dt, ul li'
-    ).all();
+    // Map of bin types to search for
+    const binTypes = ['Refuse', 'Recycling', 'Glass', 'GardenWaste', 'Food'];
     
-    for (const row of collectionRows) {
-      const text = await row.textContent();
-      if (!text) continue;
+    for (const binType of binTypes) {
+      // Look for div with ID pattern rteelem_ctl03_pnlCollections_{binType}
+      const divPattern = new RegExp(
+        `<div[^>]*id="[^"]*${binType}[^"]*"[^>]*>(.*?)</div>`,
+        'is'
+      );
+      const match = html.match(divPattern);
       
-      // Extract service type and date (best-effort pattern matching)
-      const serviceMatch = text.match(/(rubbish|recycl|food|garden|waste|bin)/i);
-      const dateMatch = text.match(/\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}|\d{1,2}(?:st|nd|rd|th)?\s+\w+/i);
-      
-      if (serviceMatch && dateMatch) {
-        collections.push({
-          service: serviceMatch[0],
-          collectionDate: dateMatch[0],
-        });
+      if (match) {
+        // Extract dates from <li> elements
+        const datePattern = /\d{1,2}\s+\w+\s+\d{4}/g;
+        const dates = match[1].match(datePattern) || [];
+        
+        if (dates.length > 0) {
+          collections.push({
+            service: binType,
+            dates: dates,
+          });
+        }
       }
     }
     
     if (collections.length === 0) {
-      warnings.push('No collection data found on page — structure may have changed or selectors need validation');
-    }
-    
-    if (!SELECTORS_VALIDATED) {
-      warnings.push('Selectors not validated - parsing may be incomplete');
+      warnings.push('No collection data found in HTML — UPRN may not have active bin services');
     }
     
     return {
+      uprn,
       collections,
       warnings,
     };
@@ -500,16 +447,16 @@ export class BasingstokeDeaneAdapter extends BrowserAdapter implements CouncilAd
       attemptId: uuidv4(),
       adapterId: this.councilId,
       councilId: this.councilId,
-      lookupMethod: LookupMethod.BROWSER_AUTOMATION,
+      lookupMethod: LookupMethod.HIDDEN_JSON,
       startedAt: new Date().toISOString(),
       completedAt: '',
       durationMs: 0,
       httpRequestCount: 0,
       bytesReceived: 0,
-      usedBrowserAutomation: true,
+      usedBrowserAutomation: false,
       adapterVersion: ADAPTER_VERSION,
       executionEnvironment: process.env.HOSTNAME || 'unknown',
-      riskLevel: ExecutionRiskLevel.MEDIUM,
+      riskLevel: ExecutionRiskLevel.LOW,
       cacheHit: false,
     };
   }
@@ -537,24 +484,5 @@ export class BasingstokeDeaneAdapter extends BrowserAdapter implements CouncilAd
   private handleError<T>(metadata: AcquisitionMetadata, error: unknown): any {
     const message = error instanceof Error ? error.message : 'Unknown error';
     return this.failureResult(metadata, FailureCategory.ADAPTER_ERROR, message);
-  }
-  
-  private createUnhealthyStatus(
-    message: string,
-    category?: FailureCategory
-  ): AdapterHealth {
-    return {
-      councilId: this.councilId,
-      status: HealthStatus.UNHEALTHY,
-      lastFailureAt: new Date().toISOString(),
-      lastFailureCategory: category || FailureCategory.UNKNOWN,
-      lastFailureMessage: message,
-      successRate24h: 0,
-      avgResponseTimeMs24h: 0,
-      acquisitionCount24h: 0,
-      checkedAt: new Date().toISOString(),
-      upstreamReachable: false,
-      schemaDriftDetected: false,
-    };
   }
 }

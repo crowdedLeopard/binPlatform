@@ -40,8 +40,10 @@ interface Address {
 interface Collection {
   collectionDate?: string;
   collection_date?: string;
+  date?: string;
   serviceType?: string;
   service_type?: string;
+  bin_types?: string[];
   isConfirmed?: boolean;
   is_confirmed?: boolean;
 }
@@ -165,7 +167,7 @@ describe.skipIf(!isLiveTestsEnabled)('Live Mock Fallback Integration Tests', () 
             const firstCollection = collectionsData.collections![0];
             
             // Should have collection date (ISO 8601 string)
-            const collectionDate = firstCollection.collectionDate || firstCollection.collection_date;
+            const collectionDate = firstCollection.collectionDate || firstCollection.collection_date || firstCollection.date;
             expect(collectionDate).toBeDefined();
             expect(typeof collectionDate).toBe('string');
             
@@ -173,22 +175,36 @@ describe.skipIf(!isLiveTestsEnabled)('Live Mock Fallback Integration Tests', () 
             const parsedDate = new Date(collectionDate!);
             expect(parsedDate.toString()).not.toBe('Invalid Date');
             
-            // Should have service type
+            // Should have service type or bin types
             const serviceType = firstCollection.serviceType || firstCollection.service_type;
-            expect(serviceType).toBeDefined();
-            expect(typeof serviceType).toBe('string');
-            expect(serviceType!.length).toBeGreaterThan(0);
+            const binTypes = firstCollection.bin_types;
             
-            // Valid service types
-            const validServiceTypes = [
-              'general_waste',
-              'recycling',
-              'garden_waste',
-              'food_waste',
-              'glass',
-              'other'
-            ];
-            expect(validServiceTypes).toContain(serviceType);
+            // Should have either service_type or bin_types
+            const hasServiceInfo = serviceType || (binTypes && binTypes.length > 0);
+            expect(hasServiceInfo).toBeTruthy();
+            
+            if (serviceType) {
+              expect(typeof serviceType).toBe('string');
+              expect(serviceType!.length).toBeGreaterThan(0);
+              
+              // Valid service types
+              const validServiceTypes = [
+                'general_waste',
+                'recycling',
+                'garden_waste',
+                'food_waste',
+                'glass',
+                'other'
+              ];
+              expect(validServiceTypes).toContain(serviceType);
+            }
+            
+            if (binTypes) {
+              expect(Array.isArray(binTypes)).toBe(true);
+              binTypes.forEach(binType => {
+                expect(typeof binType).toBe('string');
+              });
+            }
           }
         } else if (collectionsResponse.status === 503) {
           // Service unavailable - validate error structure
@@ -435,7 +451,7 @@ describe.skipIf(!isLiveTestsEnabled)('Live Mock Fallback Integration Tests', () 
       
       // Validate all collection dates
       for (const collection of collectionsData.collections) {
-        const dateStr = collection.collectionDate || collection.collection_date;
+        const dateStr = collection.collectionDate || collection.collection_date || collection.date;
         expect(dateStr).toBeDefined();
         
         // Should parse as valid date

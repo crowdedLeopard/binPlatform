@@ -111,6 +111,28 @@ export function parseCollectionDate(rawDate: string | undefined): string | null 
     }
   }
   
+  // Try "Day, DD MMM YYYY" format (e.g., "Mon, 15 Apr 2024")
+  // This is the actual format from Eastleigh HTML
+  const eastleighMatch = cleaned.match(/^[A-Za-z]{3},\s*(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})$/);
+  if (eastleighMatch) {
+    const [, day, monthStr, year] = eastleighMatch;
+    
+    // Map month abbreviations to numbers
+    const monthMap: Record<string, string> = {
+      'Jan': '01', 'Feb': '02', 'Mar': '03', 'Apr': '04',
+      'May': '05', 'Jun': '06', 'Jul': '07', 'Aug': '08',
+      'Sep': '09', 'Oct': '10', 'Nov': '11', 'Dec': '12',
+    };
+    
+    const month = monthMap[monthStr];
+    if (month) {
+      const date = new Date(`${year}-${month}-${day.padStart(2, '0')}`);
+      if (!isNaN(date.getTime())) {
+        return date.toISOString().split('T')[0];
+      }
+    }
+  }
+  
   // Try DD/MM/YYYY format (common UK format)
   const ukMatch = cleaned.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
   if (ukMatch) {

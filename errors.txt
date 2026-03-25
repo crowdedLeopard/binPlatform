@@ -1,0 +1,45 @@
+src/adapters/basingstoke-deane/parser.ts(262,41): error TS2339: Property 'binType' does not exist on type 'BasingstokeCollection | { service: string; dates: string[]; }'.
+  Property 'binType' does not exist on type '{ service: string; dates: string[]; }'.
+src/adapters/basingstoke-deane/parser.ts(262,54): error TS2339: Property 'type' does not exist on type 'BasingstokeCollection | { service: string; dates: string[]; }'.
+  Property 'type' does not exist on type '{ service: string; dates: string[]; }'.
+src/adapters/basingstoke-deane/parser.ts(268,68): error TS2339: Property 'binType' does not exist on type 'BasingstokeCollection | { service: string; dates: string[]; }'.
+  Property 'binType' does not exist on type '{ service: string; dates: string[]; }'.
+src/adapters/basingstoke-deane/parser.ts(270,37): error TS2339: Property 'frequency' does not exist on type 'BasingstokeCollection | { service: string; dates: string[]; }'.
+  Property 'frequency' does not exist on type '{ service: string; dates: string[]; }'.
+src/adapters/basingstoke-deane/parser.ts(271,41): error TS2339: Property 'containerType' does not exist on type 'BasingstokeCollection | { service: string; dates: string[]; }'.
+  Property 'containerType' does not exist on type '{ service: string; dates: string[]; }'.
+src/adapters/basingstoke-deane/parser.ts(272,43): error TS2339: Property 'containerColour' does not exist on type 'BasingstokeCollection | { service: string; dates: string[]; }'.
+  Property 'containerColour' does not exist on type '{ service: string; dates: string[]; }'.
+src/adapters/basingstoke-deane/parser.ts(272,77): error TS2339: Property 'binColour' does not exist on type 'BasingstokeCollection | { service: string; dates: string[]; }'.
+  Property 'binColour' does not exist on type '{ service: string; dates: string[]; }'.
+src/adapters/basingstoke-deane/parser.ts(272,105): error TS2339: Property 'colour' does not exist on type 'BasingstokeCollection | { service: string; dates: string[]; }'.
+  Property 'colour' does not exist on type '{ service: string; dates: string[]; }'.
+src/adapters/basingstoke-deane/parser.ts(275,33): error TS2339: Property 'notes' does not exist on type 'BasingstokeCollection | { service: string; dates: string[]; }'.
+  Property 'notes' does not exist on type '{ service: string; dates: string[]; }'.
+src/adapters/hart/index.old.ts(492,5): error TS2741: Property 'uprn' is missing in type '{ collections: any[]; warnings: string[]; }' but required in type 'HartHtmlData'.
+src/adapters/hart/parser.ts(241,13): error TS2339: Property 'services' does not exist on type 'HartCollection | { services: string[]; date: string; }'.
+  Property 'services' does not exist on type 'HartCollection'.
+src/adapters/hart/parser.ts(244,44): error TS2339: Property 'services' does not exist on type 'HartCollection | { services: string[]; date: string; }'.
+  Property 'services' does not exist on type 'HartCollection'.
+src/adapters/hart/parser.ts(266,28): error TS2339: Property 'service' does not exist on type 'HartCollection | { services: string[]; date: string; }'.
+  Property 'service' does not exist on type '{ services: string[]; date: string; }'.
+src/adapters/hart/parser.ts(266,41): error TS2339: Property 'binType' does not exist on type 'HartCollection | { services: string[]; date: string; }'.
+  Property 'binType' does not exist on type '{ services: string[]; date: string; }'.
+src/adapters/hart/parser.ts(266,54): error TS2339: Property 'type' does not exist on type 'HartCollection | { services: string[]; date: string; }'.
+  Property 'type' does not exist on type '{ services: string[]; date: string; }'.
+src/adapters/hart/parser.ts(272,42): error TS2339: Property 'service' does not exist on type 'HartCollection | { services: string[]; date: string; }'.
+  Property 'service' does not exist on type '{ services: string[]; date: string; }'.
+src/adapters/hart/parser.ts(272,68): error TS2339: Property 'binType' does not exist on type 'HartCollection | { services: string[]; date: string; }'.
+  Property 'binType' does not exist on type '{ services: string[]; date: string; }'.
+src/adapters/hart/parser.ts(274,37): error TS2339: Property 'frequency' does not exist on type 'HartCollection | { services: string[]; date: string; }'.
+  Property 'frequency' does not exist on type '{ services: string[]; date: string; }'.
+src/adapters/hart/parser.ts(275,41): error TS2339: Property 'containerType' does not exist on type 'HartCollection | { services: string[]; date: string; }'.
+  Property 'containerType' does not exist on type '{ services: string[]; date: string; }'.
+src/adapters/hart/parser.ts(276,43): error TS2339: Property 'containerColour' does not exist on type 'HartCollection | { services: string[]; date: string; }'.
+  Property 'containerColour' does not exist on type '{ services: string[]; date: string; }'.
+src/adapters/hart/parser.ts(276,77): error TS2339: Property 'binColour' does not exist on type 'HartCollection | { services: string[]; date: string; }'.
+  Property 'binColour' does not exist on type '{ services: string[]; date: string; }'.
+src/adapters/hart/parser.ts(276,105): error TS2339: Property 'colour' does not exist on type 'HartCollection | { services: string[]; date: string; }'.
+  Property 'colour' does not exist on type '{ services: string[]; date: string; }'.
+src/adapters/hart/parser.ts(279,33): error TS2339: Property 'notes' does not exist on type 'HartCollection | { services: string[]; date: string; }'.
+  Property 'notes' does not exist on type '{ services: string[]; date: string; }'.

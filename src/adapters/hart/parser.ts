@@ -171,6 +171,39 @@ export function parseCollectionEvents(
 ): CollectionEvent[] {
   const events: CollectionEvent[] = [];
   
+  // Handle new HTML table data structure
+  if ('uprn' in response && Array.isArray(response.collections)) {
+    response.collections.forEach((collection, rowIndex) => {
+      // Parse date (format: "23 January" - add year logic)
+      const collectionDate = parseCollectionDate(collection.date);
+      
+      if (collectionDate) {
+        const today = new Date().toISOString().split('T')[0];
+        const isPast = collectionDate < today;
+        
+        // Handle multiple services separated by & in single row
+        collection.services.forEach((serviceName, serviceIndex) => {
+          const serviceType = mapServiceType(serviceName);
+          
+          events.push({
+            eventId: `hart-${collectionDate}-${serviceType}-${rowIndex}-${serviceIndex}`,
+            serviceId: `hart-${serviceType}`,
+            serviceType,
+            collectionDate,
+            timeWindowStart: undefined,
+            timeWindowEnd: undefined,
+            isConfirmed: true,
+            isRescheduled: false,
+            isPast,
+          });
+        });
+      }
+    });
+    
+    return events;
+  }
+  
+  // Handle old raw response structure
   const collections = 
     'collections' in response ? response.collections :
     'schedule' in response ? response.schedule :
@@ -202,28 +235,52 @@ export function parseCollectionServices(
   
   events.forEach((event) => {
     if (!serviceMap.has(event.serviceType)) {
-      const collections = 
-        'collections' in response ? response.collections :
-        'schedule' in response ? response.schedule :
-        'bins' in response ? response.bins :
-        [];
-      
-      const rawCollection = collections?.find(c => 
-        mapServiceType(c.service || c.binType || c.type) === event.serviceType
-      );
-      
-      serviceMap.set(event.serviceType, {
-        serviceId: event.serviceId,
-        serviceType: event.serviceType,
-        serviceNameRaw: rawCollection?.service || rawCollection?.binType || event.serviceType,
-        serviceNameDisplay: formatServiceName(event.serviceType),
-        frequency: rawCollection?.frequency,
-        containerType: rawCollection?.containerType,
-        containerColour: rawCollection?.containerColour || rawCollection?.binColour || rawCollection?.colour,
-        isActive: true,
-        requiresSubscription: event.serviceType === ServiceType.GARDEN_WASTE,
-        notes: rawCollection?.notes,
-      });
+      // For new HTML table data structure
+      if ('uprn' in response && Array.isArray(response.collections)) {
+        const rawCollection = response.collections.find(c => 
+          'services' in c && c.services.some(s => mapServiceType(s) === event.serviceType)
+        );
+        
+        const serviceName = rawCollection && 'services' in rawCollection 
+          ? rawCollection.services.find(s => mapServiceType(s) === event.serviceType)
+          : undefined;
+        
+        serviceMap.set(event.serviceType, {
+          serviceId: event.serviceId,
+          serviceType: event.serviceType,
+          serviceNameRaw: serviceName || event.serviceType,
+          serviceNameDisplay: formatServiceName(event.serviceType),
+          frequency: undefined,
+          containerType: undefined,
+          containerColour: undefined,
+          isActive: true,
+          requiresSubscription: event.serviceType === ServiceType.GARDEN_WASTE,
+        });
+      } else {
+        // Old structure - check if it has the expected properties
+        const collections: HartCollection[] = 
+          ('collections' in response && Array.isArray(response.collections)) ? response.collections as HartCollection[] :
+          ('schedule' in response && Array.isArray(response.schedule)) ? response.schedule :
+          ('bins' in response && Array.isArray(response.bins)) ? response.bins :
+          [];
+        
+        const rawCollection = collections.find((c: HartCollection) => 
+          mapServiceType(c?.service || c?.binType || c?.type) === event.serviceType
+        );
+        
+        serviceMap.set(event.serviceType, {
+          serviceId: event.serviceId,
+          serviceType: event.serviceType,
+          serviceNameRaw: rawCollection?.service || rawCollection?.binType || event.serviceType,
+          serviceNameDisplay: formatServiceName(event.serviceType),
+          frequency: rawCollection?.frequency,
+          containerType: rawCollection?.containerType,
+          containerColour: rawCollection?.containerColour || rawCollection?.binColour || rawCollection?.colour,
+          isActive: true,
+          requiresSubscription: event.serviceType === ServiceType.GARDEN_WASTE,
+          notes: rawCollection?.notes,
+        });
+      }
     }
   });
   
@@ -274,6 +331,26 @@ export function parseAddressCandidates(
       confidence: 1.0,
     };
   });
+}
+
+/**
+ * Validate UPRN format.
+ */
+export function validateUprn(uprn: string): { valid: boolean; normalized?: string; error?: string } {
+  const cleaned = uprn.trim();
+  
+  // UPRN should be numeric and 1-12 digits
+  if (!/^\d{1,12}$/.test(cleaned)) {
+    return {
+      valid: false,
+      error: 'Invalid UPRN format (must be 1-12 digits)',
+    };
+  }
+  
+  return {
+    valid: true,
+    normalized: cleaned,
+  };
 }
 
 /**

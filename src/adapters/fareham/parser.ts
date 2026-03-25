@@ -1,8 +1,8 @@
 /**
- * Fareham Borough Council - Bartec Response Parser
+ * Fareham Borough Council - JSON Response Parser
  * 
- * Parses Bartec Collective SOAP/XML responses into normalized collection events.
- * Handles Bartec-specific service codes and date formats.
+ * Parses Fareham's public JSON API responses into normalized collection events.
+ * Handles date formats like "26/03/2026 (Refuse) and 02/04/2026 (Recycling)".
  * 
  * @module adapters/fareham/parser
  */
@@ -13,229 +13,253 @@ import {
   CollectionService,
 } from '../base/adapter.interface.js';
 import type {
-  FarehamBartecResponse,
-  FarehamService,
-  BartecSoapResponse,
+  FarehamAddressRow,
 } from './types.js';
-import { v4 as uuidv4 } from 'uuid';
 
 /**
- * Parse Bartec XML response into structured data.
- * Handles multiple possible response structures from Bartec API.
+ * Normalize service type string to canonical ServiceType.
  */
-export function parseBartecResponse(soapResponse: BartecSoapResponse): FarehamBartecResponse {
-  // Extract Features_GetResult from SOAP envelope
-  const result = soapResponse?.Envelope?.Body?.Features_GetResponse?.Features_GetResult;
+export function normalizeServiceType(serviceType: string): ServiceType {
+  const normalized = serviceType.toLowerCase();
   
-  if (!result) {
-    return { error: 'No Features_GetResult in SOAP response' };
-  }
-  
-  // Bartec responses can vary - handle common structures
-  const response: FarehamBartecResponse = {
-    uprn: extractValue(result, ['UPRN', 'Uprn', 'uprn']),
-    address: extractValue(result, ['Address', 'address', 'FullAddress']),
-    postcode: extractValue(result, ['Postcode', 'postcode', 'PostCode']),
-    services: parseServices(result),
-  };
-  
-  return response;
-}
-
-/**
- * Extract value from object using multiple possible key names.
- */
-function extractValue(obj: any, keys: string[]): string | undefined {
-  for (const key of keys) {
-    if (obj && obj[key] !== undefined) {
-      return String(obj[key]);
-    }
-  }
-  return undefined;
-}
-
-/**
- * Parse services array from Bartec result.
- */
-function parseServices(result: any): FarehamService[] {
-  const services: FarehamService[] = [];
-  
-  // Try different possible service array locations
-  const serviceArray = 
-    result?.Services?.Service ||
-    result?.Service ||
-    result?.Collections?.Collection ||
-    result?.Features?.Feature;
-  
-  if (!serviceArray) return services;
-  
-  // Handle both single object and array
-  const items = Array.isArray(serviceArray) ? serviceArray : [serviceArray];
-  
-  for (const item of items) {
-    services.push({
-      serviceCode: extractValue(item, ['ServiceCode', 'Code', 'Type']),
-      serviceName: extractValue(item, ['ServiceName', 'Name', 'Description']),
-      serviceType: extractValue(item, ['ServiceType', 'Type']),
-      nextCollection: extractValue(item, ['NextCollection', 'CollectionDate', 'Date']),
-      frequency: extractValue(item, ['Frequency', 'Schedule']),
-      container: extractValue(item, ['Container', 'ContainerType', 'BinType']),
-      color: extractValue(item, ['Color', 'Colour', 'BinColour']),
-      round: extractValue(item, ['Round', 'RoundCode']),
-      status: extractValue(item, ['Status', 'Active']),
-      notes: extractValue(item, ['Notes', 'Message']),
-    });
-  }
-  
-  return services;
-}
-
-/**
- * Map Bartec service code to canonical ServiceType.
- */
-export function mapBartecServiceType(service: FarehamService): ServiceType {
-  const code = (service.serviceCode || service.serviceType || '').toUpperCase();
-  const name = (service.serviceName || '').toLowerCase();
-  
-  // Check service code first
-  if (code.match(/^(RES|REFUSE|RESIDUAL|WASTE)$/)) {
+  if (normalized.includes('refuse') || normalized.includes('general') || normalized.includes('rubbish') || normalized.includes('waste')) {
     return ServiceType.GENERAL_WASTE;
   }
-  
-  if (code.match(/^(REC|RECYCLE|RECYCLING|DRY)$/)) {
+  if (normalized.includes('recycl')) {
     return ServiceType.RECYCLING;
   }
-  
-  if (code.match(/^(GW|GARDEN|GREEN)$/)) {
+  if (normalized.includes('garden')) {
     return ServiceType.GARDEN_WASTE;
   }
-  
-  if (code.match(/^(FOOD|FW|ORG)$/)) {
+  if (normalized.includes('food') || normalized.includes('organic')) {
     return ServiceType.FOOD_WASTE;
   }
-  
-  if (code.match(/^(GLASS|GL)$/)) {
+  if (normalized.includes('glass')) {
     return ServiceType.GLASS;
   }
-  
-  // Fallback to name matching
-  if (name.includes('refuse') || name.includes('general') || name.includes('rubbish')) {
-    return ServiceType.GENERAL_WASTE;
-  }
-  
-  if (name.includes('recycl')) {
-    return ServiceType.RECYCLING;
-  }
-  
-  if (name.includes('garden')) {
-    return ServiceType.GARDEN_WASTE;
-  }
-  
-  if (name.includes('food')) {
-    return ServiceType.FOOD_WASTE;
-  }
-  
-  if (name.includes('glass')) {
-    return ServiceType.GLASS;
-  }
-  
-  // Log unknown service codes for investigation
-  console.warn(`[Fareham] Unknown Bartec service code: ${code} (${name})`);
   
   return ServiceType.OTHER;
 }
 
 /**
- * Parse Bartec date string to ISO 8601.
+ * Parse date in DD/MM/YYYY format to ISO 8601 (YYYY-MM-DD).
  */
-export function parseBartecDate(dateStr: string | undefined): string | null {
-  if (!dateStr) return null;
-  
+function parseFarehamDate(dateStr: string): string | null {
   const cleaned = dateStr.trim();
   
-  // ISO format
-  if (/^\d{4}-\d{2}-\d{2}/.test(cleaned)) {
-    return cleaned.split('T')[0];
+  // Handle "today" keyword
+  if (cleaned.toLowerCase() === 'today') {
+    return new Date().toISOString().split('T')[0];
   }
   
-  // DD/MM/YYYY
-  const ukMatch = cleaned.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
-  if (ukMatch) {
-    const [, day, month, year] = ukMatch;
+  // DD/MM/YYYY format
+  const match = cleaned.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (match) {
+    const [, day, month, year] = match;
     return `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
-  }
-  
-  // Try parsing as timestamp
-  const timestamp = Date.parse(cleaned);
-  if (!isNaN(timestamp)) {
-    return new Date(timestamp).toISOString().split('T')[0];
   }
   
   return null;
 }
 
 /**
- * Parse Bartec response into CollectionEvents.
+ * Extract collection events from BinCollectionInformation field.
+ * Format: "26/03/2026 (Refuse) and 02/04/2026 (Recycling)"
  */
-export function parseCollectionEvents(response: FarehamBartecResponse): CollectionEvent[] {
-  const events: CollectionEvent[] = [];
+function parseCollectionInformation(info: string): Array<{ date: string; type: string }> {
+  const results: Array<{ date: string; type: string }> = [];
   
-  if (!response.services || response.services.length === 0) {
-    return events;
+  // Match patterns like "26/03/2026 (Refuse)" or "today (Recycling)"
+  const regex = /(\d{1,2}\/\d{1,2}\/\d{4}|today)\s*\(([^)]+)\)/gi;
+  let match;
+  
+  while ((match = regex.exec(info)) !== null) {
+    const dateStr = match[1];
+    const typeStr = match[2];
+    const isoDate = parseFarehamDate(dateStr);
+    
+    if (isoDate) {
+      results.push({ date: isoDate, type: typeStr });
+    }
   }
   
+  return results;
+}
+
+/**
+ * Extract garden waste date from field.
+ * Format: "Thursday 02/04/2026" or just "02/04/2026"
+ */
+function parseGardenWasteDate(dateStr: string): string | null {
+  const match = dateStr.match(/(\d{1,2}\/\d{1,2}\/\d{4})/);
+  if (match) {
+    return parseFarehamDate(match[1]);
+  }
+  return null;
+}
+
+/**
+ * Parse Fareham JSON row into CollectionEvents.
+ */
+export function parseCollectionEvents(row: FarehamAddressRow): CollectionEvent[] {
+  const events: CollectionEvent[] = [];
   const today = new Date().toISOString().split('T')[0];
   
-  for (const service of response.services) {
-    const serviceType = mapBartecServiceType(service);
-    const collectionDate = parseBartecDate(service.nextCollection);
+  // Parse main bin collection information
+  if (row.BinCollectionInformation) {
+    const collections = parseCollectionInformation(row.BinCollectionInformation);
     
-    if (!collectionDate) {
-      console.warn(`[Fareham] No valid collection date for service: ${service.serviceCode}`);
-      continue;
+    for (const collection of collections) {
+      const serviceType = normalizeServiceType(collection.type);
+      
+      events.push({
+        eventId: `fareham-${collection.date}-${serviceType}`,
+        serviceId: `fareham-${serviceType}`,
+        serviceType,
+        collectionDate: collection.date,
+        timeWindowStart: undefined,
+        timeWindowEnd: undefined,
+        isConfirmed: true,
+        isRescheduled: false,
+        isPast: collection.date < today,
+        notes: undefined,
+      });
     }
-    
-    events.push({
-      eventId: `fareham-${collectionDate}-${serviceType}`,
-      serviceId: `fareham-${serviceType}`,
-      serviceType,
-      collectionDate,
-      timeWindowStart: undefined,
-      timeWindowEnd: undefined,
-      isConfirmed: true,
-      isRescheduled: false,
-      isPast: collectionDate < today,
-      notes: service.notes,
-    });
   }
+  
+  // Handle legacy format (DomesticBinDay)
+  if (row.DomesticBinDay && !row.BinCollectionInformation) {
+    const collections = parseCollectionInformation(row.DomesticBinDay);
+    
+    for (const collection of collections) {
+      const serviceType = normalizeServiceType(collection.type);
+      
+      events.push({
+        eventId: `fareham-${collection.date}-${serviceType}`,
+        serviceId: `fareham-${serviceType}`,
+        serviceType,
+        collectionDate: collection.date,
+        timeWindowStart: undefined,
+        timeWindowEnd: undefined,
+        isConfirmed: true,
+        isRescheduled: false,
+        isPast: collection.date < today,
+        notes: undefined,
+      });
+    }
+  }
+  
+  // Parse garden waste (try all possible field names)
+  const gardenWasteField = 
+    row['GardenWasteBinDay<br/>(seenotesabove)'] || 
+    row.GardenWasteDay || 
+    row.GardenWasteBinDay;
+    
+  if (gardenWasteField) {
+    const gardenDate = parseGardenWasteDate(gardenWasteField);
+    if (gardenDate) {
+      events.push({
+        eventId: `fareham-${gardenDate}-${ServiceType.GARDEN_WASTE}`,
+        serviceId: `fareham-${ServiceType.GARDEN_WASTE}`,
+        serviceType: ServiceType.GARDEN_WASTE,
+        collectionDate: gardenDate,
+        timeWindowStart: undefined,
+        timeWindowEnd: undefined,
+        isConfirmed: true,
+        isRescheduled: false,
+        isPast: gardenDate < today,
+        notes: 'Subscription service',
+      });
+    }
+  }
+  
+  // Sort events by date
+  events.sort((a, b) => a.collectionDate.localeCompare(b.collectionDate));
   
   return events;
 }
 
 /**
- * Parse Bartec response into CollectionServices.
+ * Parse Fareham JSON row into CollectionServices.
  */
-export function parseCollectionServices(response: FarehamBartecResponse): CollectionService[] {
+export function parseCollectionServices(row: FarehamAddressRow): CollectionService[] {
   const services: CollectionService[] = [];
+  const seen = new Set<ServiceType>();
   
-  if (!response.services || response.services.length === 0) {
-    return services;
+  // Determine which services are available based on fields present
+  
+  // Parse main bin collection information
+  if (row.BinCollectionInformation) {
+    const collections = parseCollectionInformation(row.BinCollectionInformation);
+    
+    for (const collection of collections) {
+      const serviceType = normalizeServiceType(collection.type);
+      
+      if (!seen.has(serviceType)) {
+        seen.add(serviceType);
+        
+        services.push({
+          serviceId: `fareham-${serviceType}`,
+          serviceType,
+          serviceNameRaw: collection.type,
+          serviceNameDisplay: formatServiceName(serviceType),
+          frequency: 'Weekly or Fortnightly', // Fareham alternates
+          containerType: serviceType === ServiceType.RECYCLING ? 'Blue bin' : serviceType === ServiceType.GENERAL_WASTE ? 'Green bin' : undefined,
+          containerColour: serviceType === ServiceType.RECYCLING ? 'Blue' : serviceType === ServiceType.GENERAL_WASTE ? 'Green' : undefined,
+          isActive: true,
+          requiresSubscription: false,
+          notes: undefined,
+        });
+      }
+    }
   }
   
-  for (const service of response.services) {
-    const serviceType = mapBartecServiceType(service);
+  // Handle legacy format
+  if (row.DomesticBinDay && !row.BinCollectionInformation) {
+    const collections = parseCollectionInformation(row.DomesticBinDay);
+    
+    for (const collection of collections) {
+      const serviceType = normalizeServiceType(collection.type);
+      
+      if (!seen.has(serviceType)) {
+        seen.add(serviceType);
+        
+        services.push({
+          serviceId: `fareham-${serviceType}`,
+          serviceType,
+          serviceNameRaw: collection.type,
+          serviceNameDisplay: formatServiceName(serviceType),
+          frequency: 'Weekly or Fortnightly',
+          containerType: undefined,
+          containerColour: undefined,
+          isActive: true,
+          requiresSubscription: false,
+          notes: undefined,
+        });
+      }
+    }
+  }
+  
+  // Add garden waste if present
+  const gardenWasteField = 
+    row['GardenWasteBinDay<br/>(seenotesabove)'] || 
+    row.GardenWasteDay || 
+    row.GardenWasteBinDay;
+    
+  if (gardenWasteField && !seen.has(ServiceType.GARDEN_WASTE)) {
+    seen.add(ServiceType.GARDEN_WASTE);
     
     services.push({
-      serviceId: `fareham-${serviceType}`,
-      serviceType,
-      serviceNameRaw: service.serviceName || service.serviceCode || '',
-      serviceNameDisplay: formatServiceName(serviceType),
-      frequency: service.frequency,
-      containerType: service.container,
-      containerColour: service.color,
-      isActive: service.status !== 'INACTIVE' && service.status !== 'SUSPENDED',
-      requiresSubscription: serviceType === ServiceType.GARDEN_WASTE,
-      notes: service.notes,
+      serviceId: `fareham-${ServiceType.GARDEN_WASTE}`,
+      serviceType: ServiceType.GARDEN_WASTE,
+      serviceNameRaw: 'Garden Waste',
+      serviceNameDisplay: 'Garden Waste (Clip & Collect)',
+      frequency: 'Fortnightly',
+      containerType: undefined,
+      containerColour: undefined,
+      isActive: true,
+      requiresSubscription: true,
+      notes: 'Subscription required - see https://www.fareham.gov.uk/waste_collection_and_recycling/garden_waste_and_composting/gardenwastecollection.aspx',
     });
   }
   
@@ -247,7 +271,7 @@ export function parseCollectionServices(response: FarehamBartecResponse): Collec
  */
 function formatServiceName(serviceType: ServiceType): string {
   const mapping: Record<ServiceType, string> = {
-    [ServiceType.GENERAL_WASTE]: 'General Waste',
+    [ServiceType.GENERAL_WASTE]: 'General Waste (Refuse)',
     [ServiceType.RECYCLING]: 'Recycling',
     [ServiceType.GARDEN_WASTE]: 'Garden Waste',
     [ServiceType.FOOD_WASTE]: 'Food Waste',
@@ -263,25 +287,4 @@ function formatServiceName(serviceType: ServiceType): string {
   };
   
   return mapping[serviceType] || 'Unknown';
-}
-
-/**
- * Calculate confidence score based on response completeness.
- */
-export function calculateConfidence(response: FarehamBartecResponse): number {
-  let score = 0.5;
-  
-  if (response.uprn) score += 0.1;
-  if (response.address) score += 0.1;
-  if (response.services && response.services.length > 0) {
-    score += 0.2;
-    
-    // Check if services have dates
-    const withDates = response.services.filter(s => s.nextCollection).length;
-    if (withDates > 0) {
-      score += (withDates / response.services.length) * 0.2;
-    }
-  }
-  
-  return Math.min(score, 1.0);
 }

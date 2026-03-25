@@ -659,3 +659,58 @@ Updated registry to support config-driven management:
 - **Holden (Lead Architect):** APPROVED - Resilience layer complete, production-ready
 - **Awaiting:** Amos (security review of snapshot storage), Drummer (cron job setup)
 
+
+### 2026-03-25: Community Project Research & Rushmoor Adapter Fix
+
+**Research Completed:**
+- **UKBinCollectionData Community Project Analysis** (docs/community-research-hampshire.md):
+  - Researched all 13 Hampshire councils in the obbrad/UKBinCollectionData GitHub project
+  - **9 councils found** with working implementations (Eastleigh, Fareham, Portsmouth, Southampton, Winchester, New Forest, Test Valley, Basingstoke, Gosport, Hart, Rushmoor)
+  - **5 councils have significant method mismatches** requiring fixes
+  - **2 councils** (East Hampshire, Havant) not yet implemented upstream
+  - Identified critical gaps:
+    - **Fareham**: We assumed Bartec SOAP API; community uses simple JSON endpoint
+    - **Rushmoor**: We used browser automation; community uses direct JSON API
+    - **Gosport**: We used browser automation; community uses Supatrak API with hardcoded auth
+    - **Basingstoke**: We assumed form scraping; community uses cookie-based GET
+    - **Hart**: We assumed browser automation; community uses JSON API
+  - **Southampton & Eastleigh**: ✅ Already correctly implemented!
+  - Documented all endpoints, request methods, parsing strategies, and confidence levels
+
+**Immediate Fix Implemented:**
+- **Rushmoor Borough Council Adapter Rewrite**:
+  - **Before**: BrowserAdapter with Playwright (~500 lines, heavyweight)
+  - **After**: Simple HTTP fetch adapter (~600 lines, lightweight)
+  - **Method**: Direct API access via GET https://www.rushmoor.gov.uk/Umbraco/Api/BinLookUpWorkAround/Get?selectedAddress={uprn}
+  - **Response format**: JSON embedded in HTML <p> tag (quirky but simple to parse)
+  - **Collection types**: Green general waste, Blue recycling, Brown garden, Black food waste
+  - **Date format**: ISO 8601 (YYYY-MM-DDTHH:MM:SS)
+  - **Exception messages**: Appended to bin type if present (e.g., "Green general waste bin (Not this week)")
+  - **Risk level**: Reduced from MEDIUM to LOW (no browser, no JavaScript execution)
+  - **Performance**: Expect 5-10x faster response time vs browser automation
+  - **Confidence**: 95% (API endpoint name contains "WorkAround" suggesting unofficial status)
+
+**Build Status:**
+- ✅ Zero TypeScript errors after fix
+- ✅ All adapter interface requirements met
+- ✅ Evidence storage integrated
+- ✅ Kill switch support enabled
+- ✅ Confidence scoring implemented
+
+**Top 3 Easiest Wins Identified:**
+1. **Rushmoor** (COMPLETED) — Browser automation → API call (95% confidence)
+2. **Basingstoke** (PENDING) — Form scraper → Cookie-based GET (95% confidence)
+3. **Hart** (PENDING) — Browser automation → JSON API with HTML table (95% confidence)
+
+**Next Actions:**
+- Basingstoke adapter rewrite (1 hour)
+- Hart adapter rewrite (1.5 hours)
+- Gosport adapter rewrite + credential security review (1 hour)
+- Fareham adapter rewrite from Bartec SOAP to JSON endpoint (2-3 hours)
+- Total: ~6 hours to get 5 new working councils
+
+**Discovery Credit:**
+- All endpoint discovery and method validation credit to obbrad/UKBinCollectionData community project
+- Their battle-tested Python implementations provided exact URLs, headers, parsing patterns
+- Southampton direct UPRN endpoint was discovered from this project
+

@@ -92,14 +92,15 @@
       "confidence_score": 0.85,
       "last_verified": "2026-03-25",
       "acquisition_path_summary": "Bartec Collective platform. SOAP-based API (Bartec Collective API) with Features_Get endpoint. Public dashboard at farehamgw.bartecmunicipal.com. Authentication required for API access.",
-      "notes": "BARTEC PLATFORM IDENTIFIED. Uses Bartec Municipal Technologies Collective system. Public dashboard exists (farehamgw.bartecmunicipal.com). Official SOAP API available but requires authentication token. API endpoint example: collectiveapi.bartec-systems.com/API-R1531/CollectiveAPI.asmx. Methods include Features_Get (collection dates by UPRN). May need council partnership for API credentials. Web scraping of public dashboard possible as alternative.",
+      "notes": "BARTEC PLATFORM IDENTIFIED. Uses Bartec Municipal Technologies Collective system. AUTHENTICATION REQUIRED: Set FAREHAM_API_USERNAME and FAREHAM_API_PASSWORD environment variables to access Bartec SOAP API. Without credentials, endpoint returns HTML login page instead of XML. Public dashboard exists (farehamgw.bartecmunicipal.com) but also requires auth. API endpoint: https://farehamgw.bartecmunicipal.com/API/CollectiveAPI.asmx with Features_Get method. Council partnership recommended for API access.",
       "robots_caution": "Check robots.txt for both council domain and bartecmunicipal.com.",
       "terms_caution": "API requires credentials - likely need formal council agreement. Public dashboard may be scrapable.",
       "security_notes": "SOAP API uses token authentication. Dashboard may have different auth. Bartec platforms vary in security config per council. Test public dashboard access level first.",
       "upstream_risk_level": "medium",
       "recommended_adapter_approach": "Option A: Request API credentials from council (proper but bureaucratic). Option B: Scrape public Bartec dashboard (farehamgw.bartecmunicipal.com) if accessible. Option C: Screen-scrape council website form. Bartec adapter pattern reusable across councils.",
       "brittleness_concerns": "API credentials may expire or require renewal. Dashboard UI changes. Bartec version upgrades could change response format.",
-      "rate_limit_guidance": "If using API: follow Bartec docs. If scraping dashboard: max 1 req/2sec, respect 429 responses."
+      "rate_limit_guidance": "If using API: follow Bartec docs. If scraping dashboard: max 1 req/2sec, respect 429 responses.",
+      "requires_credentials": true
     },
     {
       "council_id": "gosport",

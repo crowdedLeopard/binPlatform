@@ -49,16 +49,23 @@ export interface HartAddress {
   town?: string;
 }
 
-export interface HartFormData {
-  csrfToken?: string;
-  actionUrl?: string;
-  postcodeFieldName?: string;
-  addressFieldName?: string;
-  hiddenFields?: Record<string, string>;
-}
+/**
+ * JSON response from Hart API.
+ * Response is an array with single object containing HTML in 'data' field.
+ */
+export type HartJsonResponse = Array<{ data: string }>;
 
+/**
+ * Parsed HTML table data.
+ */
 export interface HartHtmlData {
-  collections: HartCollection[];
-  address?: string;
+  /** UPRN */
+  uprn: string;
+  
+  /** Collection schedule extracted from HTML table */
+  collections: Array<{ services: string[]; date: string }>;
+  
+  /** Warnings during parsing */
   warnings: string[];
 }
+

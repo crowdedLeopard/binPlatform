@@ -118,11 +118,11 @@ export interface BasingstokeFormData {
  * Parsed HTML response containing collection data.
  */
 export interface BasingstokeHtmlData {
-  /** Collection schedule extracted from HTML */
-  collections: BasingstokeCollection[];
+  /** UPRN */
+  uprn: string;
   
-  /** Property address */
-  address?: string;
+  /** Collection schedule extracted from HTML */
+  collections: Array<{ service: string; dates: string[] }>;
   
   /** Warnings during parsing */
   warnings: string[];
