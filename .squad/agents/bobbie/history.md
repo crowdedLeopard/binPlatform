@@ -544,3 +544,46 @@ tests/
 **Test Duration:** ~6.3s for all automated tests
 
 **Sign-off:** ✅ E2E tests confirm staging API is functional. Security fixes required before production launch.
+
+### 2026-03-25: E2E Collection Flow Tests & Registry Unit Tests
+
+**Test Coverage Added:**
+1. **E2E Collection Flow Tests** (	ests/e2e/collection-flow.test.ts):
+   - Address lookup by postcode (with and without councilId parameter)
+   - Property collections endpoint (/v1/properties/:propertyId/collections)
+   - Property services endpoint (/v1/properties/:propertyId/services)
+   - Invalid input validation (malformed postcodes, invalid property IDs)
+   - Kill-switched council behavior (503 response with explanation)
+   - Unknown council handling (404 response)
+   - Error resilience: Accept 503 (upstream down) and 404 (not implemented yet)
+   - Reject 500 errors (always bugs) and HTML responses (must be JSON)
+   - 14 comprehensive test cases covering happy path + error scenarios
+
+2. **Adapter Registry Unit Tests** (	ests/unit/adapters/registry.test.ts):
+   - getAdapter() returns correct adapters for all 13 councils
+   - AdapterDisabledError thrown for unknown councils
+   - isCouncilSupported() validates registration status
+   - listCouncils() returns complete list of 13 registered councils
+   - Adapter capabilities verification (Eastleigh, Rushmoor)
+   - Kill switch naming convention documentation
+   - 17 test cases — all passed ✓
+
+**Rushmoor Adapter Status:**
+- ✓ Adapter exists at src/adapters/rushmoor/index.ts
+- ✓ Properly wired in registry (registered on startup)
+- ✓ Production-ready with browser automation (Playwright)
+- ✓ Implements full adapter interface contract
+- ✓ Capabilities: address lookup, collections, services, health checks
+
+**Key Testing Patterns:**
+- **Resilient E2E tests:** Accept 503 (upstream unavailable) and 404 (endpoint not yet implemented) as valid states during development
+- **JSON-only responses:** Tests verify all responses are JSON (never HTML) even for errors
+- **No 500 errors tolerated:** Internal server errors (500) are always considered bugs
+- **Property ID format:** Tests use councilId:localId format (e.g., astleigh:100060321174)
+- **Registry initialization:** Unit tests call initializeAdapters() in eforeAll() hook
+
+**Test Execution:**
+- Build check: ✓ No TypeScript errors
+- Registry unit tests: 17 passed ✓
+- E2E tests: Ready to run against staging API (manual execution)
+
