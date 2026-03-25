@@ -3,6 +3,17 @@ import helmet from '@fastify/helmet';
 import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
 import { logger } from '../observability/logger.js';
+import { readFileSync } from 'fs';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+
+// Load council registry at startup
+const __dirname = dirname(fileURLToPath(import.meta.url));
+let councilRegistry: any[] = [];
+try {
+  const raw = JSON.parse(readFileSync(join(__dirname, '../../data/council-registry.json'), 'utf8'));
+  councilRegistry = Array.isArray(raw) ? raw : (raw.councils ?? Object.values(raw));
+} catch { /* registry unavailable */ }
 
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const HOST = process.env.HOST || '0.0.0.0';
@@ -16,7 +27,9 @@ const corsOrigins = process.env.CORS_ORIGIN?.split(',') || ['http://localhost:30
  */
 export async function buildServer() {
   const server = Fastify({
-    logger: logger,
+    logger: {
+      level: process.env.LOG_LEVEL || 'info',
+    },
     trustProxy: true,
     requestIdLogLabel: 'requestId',
     disableRequestLogging: false,
@@ -135,9 +148,48 @@ export async function buildServer() {
   });
 
   // TODO: Register API routes
-  // await server.register(councilsRoutes, { prefix: '/api/v1/councils' });
-  // await server.register(propertiesRoutes, { prefix: '/api/v1/properties' });
-  // await server.register(adminRoutes, { prefix: '/api/v1/admin' });
+  // Inline v1 routes — council registry served from data/council-registry.json
+  server.get('/v1/councils', async () => ({
+    councils: councilRegistry.map(c => ({
+      council_id: c.council_id,
+      council_name: c.council_name,
+      official_waste_url: c.official_waste_url,
+      lookup_method: c.lookup_method,
+      required_input: c.required_input,
+      confidence_score: c.confidence_score,
+      adapter_status: c.adapter_status,
+      upstream_risk_level: c.upstream_risk_level
+    })),
+    count: councilRegistry.length,
+    source_timestamp: new Date().toISOString()
+  }));
+
+  server.get('/v1/councils/:councilId', async (request: any, reply: any) => {
+    const council = councilRegistry.find(c => c.council_id === request.params.councilId);
+    if (!council) {
+      reply.code(404).send({ statusCode: 404, error: 'Not Found', message: `Council '${request.params.councilId}' not found` });
+      return;
+    }
+    return { council, source_timestamp: new Date().toISOString() };
+  });
+
+  server.get('/v1/councils/:councilId/health', async (request: any, reply: any) => {
+    const council = councilRegistry.find(c => c.council_id === request.params.councilId);
+    if (!council) {
+      reply.code(404).send({ statusCode: 404, error: 'Not Found', message: `Council '${request.params.councilId}' not found` });
+      return;
+    }
+    const killSwitchKey = `ADAPTER_KILL_SWITCH_${council.council_id.toUpperCase().replace(/-/g, '_')}`;
+    const isKilled = process.env[killSwitchKey] === 'true';
+    return {
+      council_id: council.council_id,
+      status: isKilled ? 'disabled' : council.adapter_status ?? 'unknown',
+      kill_switch_active: isKilled,
+      confidence_score: council.confidence_score,
+      upstream_risk_level: council.upstream_risk_level,
+      checked_at: new Date().toISOString()
+    };
+  });
 
   // Global error handler - sanitize errors in production
   server.setErrorHandler((error, request, reply) => {
