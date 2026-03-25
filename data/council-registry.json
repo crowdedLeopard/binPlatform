@@ -269,17 +269,18 @@
         "service_info_only": false,
         "machine_readable_endpoint": false
       },
-      "confidence_score": 0.6,
+      "confidence_score": 0.8,
       "last_verified": "2026-03-25",
       "acquisition_path_summary": "Bin collection calendar with postcode/street name input. Site uses Incapsula (Imperva) bot protection. 403 blocks likely. Third-party UPRN service exists (bin-calendar.nova.do).",
-      "notes": "CAUTION: Incapsula/Imperva bot protection detected on site. Likely to block automated access. Calendar requires postcode/street name (min 6 chars). Third-party service 'Bin Calendar' (bin-calendar.nova.do) offers UPRN-based lookup for Southampton - may be more reliable than direct council access. Large urban authority. Consider third-party proxy or browser automation.",
+      "notes": "Southampton adapter uses direct UPRN endpoint at /whereilive/waste-calendar?UPRN=<uprn> which bypasses Incapsula frontend protection. DISCOVERY: UKBinCollectionData project found this working endpoint. Status: MAY BE BLOCKED from Azure IPs - Incapsula policy may have changed. Local testing works but staging deployment blocked. Monitor for IP-based blocking.",
       "robots_caution": "Incapsula protection active. Check robots.txt but expect aggressive blocking.",
       "terms_caution": "Bot protection suggests automated access discouraged. Review policy carefully.",
       "security_notes": "Incapsula/Imperva CDN protection. Likely CAPTCHA, rate limiting, bot detection. High security posture. Third-party bin-calendar service may be workaround.",
       "upstream_risk_level": "high",
       "recommended_adapter_approach": "Direct access difficult due to Incapsula. Options: (1) Browser automation with Playwright, (2) Use third-party bin-calendar.nova.do UPRN service, (3) UPRN lookup alternative. Third-party service likely more stable short-term. Consider this lower priority until security posture understood.",
       "brittleness_concerns": "Incapsula protection may block all automation. Third-party service dependency if using bin-calendar. CAPTCHA challenges likely. High maintenance risk.",
-      "rate_limit_guidance": "If attempting direct access: extremely conservative, expect blocks. Third-party service: follow their rate limits."
+      "rate_limit_guidance": "If attempting direct access: extremely conservative, expect blocks. Third-party service: follow their rate limits.",
+      "adapter_status": "implemented"
     },
     {
       "council_id": "test-valley",
