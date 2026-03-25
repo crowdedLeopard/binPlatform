@@ -243,8 +243,10 @@ class AuditLogger {
       ...fullEvent,
     }, `AUDIT: ${event.action}`);
     
-    // TODO: Ship to SIEM (implement transport injection point)
-    // this.shipToSiem(fullEvent);
+    // Ship to SIEM (async, non-blocking)
+    this.shipToSiem(fullEvent).catch(err => {
+      logger.debug('SIEM shipping failed', { error: err });
+    });
   }
   
   /**
@@ -467,18 +469,19 @@ class AuditLogger {
   }
   
   /**
-   * Placeholder for SIEM integration.
-   * Inject transport implementation here for production.
+   * Ship audit event to SIEM.
+   * Async, non-blocking transport to Azure Monitor Log Analytics.
    */
-  private shipToSiem(event: AuditEvent): void {
-    // TODO: Implement SIEM transport
-    // Example integrations:
-    // - Azure Sentinel (REST API)
-    // - Splunk HEC
-    // - Datadog
-    // - Custom syslog
-    //
-    // Transport should be async and never block request path
+  private async shipToSiem(event: AuditEvent): Promise<void> {
+    // Dynamic import to avoid circular dependencies
+    // SIEM forwarder is initialized separately during app startup
+    try {
+      const { siemForwarder } = await import('./siem-forwarder.js');
+      await siemForwarder.forward(event);
+    } catch (error) {
+      // Log error but never throw - audit logging is best effort
+      logger.debug('SIEM forwarding not available or failed', { error });
+    }
   }
 }
 
