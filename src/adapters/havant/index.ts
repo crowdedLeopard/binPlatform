@@ -108,7 +108,7 @@ export class HavantAdapter extends BrowserAdapter implements CouncilAdapter {
     }
     
     // Check kill switch
-    if (process.env.ADAPTER_KILL_SWITCH_HAVANT_DEANE === 'true') {
+    if (process.env.ADAPTER_KILL_SWITCH_HAVANT === 'true') {
       return this.failureResult(
         metadata,
         FailureCategory.ADAPTER_ERROR,

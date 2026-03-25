@@ -108,7 +108,7 @@ export class GosportAdapter extends BrowserAdapter implements CouncilAdapter {
     }
     
     // Check kill switch
-    if (process.env.ADAPTER_KILL_SWITCH_GOSPORT_DEANE === 'true') {
+    if (process.env.ADAPTER_KILL_SWITCH_GOSPORT === 'true') {
       return this.failureResult(
         metadata,
         FailureCategory.ADAPTER_ERROR,
