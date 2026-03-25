@@ -39,7 +39,7 @@
     "@hono/node-server": "^1.13.0",
     "@hono/zod-validator": "^0.4.0",
     "bullmq": "^5.0.0",
-    "drizzle-orm": "^0.35.0",
+    "drizzle-orm": "^0.45.1",
     "fast-xml-parser": "^4.5.0",
     "fastify": "^5.8.4",
     "hono": "^4.6.0",
