@@ -2331,6 +2331,29 @@ Before deploying to production:
   - Uncached property search (target: <500ms p99)
   - Abuse simulation (sustained 1,000 req/s)
 - **IR Drills:** 3 runbooks (data breach, DDoS, service degradation)
+
+---
+
+## Phase 4+ Decisions (Infrastructure & Deployment)
+
+### Infrastructure Configuration (Drummer)
+
+**Decision 1: Database & Redis Wiring to Container App**
+- **Status:** ✅ Implemented (2026-03-25)
+- **Decision:** Wire DATABASE_URL and REDIS_URL from Azure Key Vault to Container App (ca-binplatform-api-staging)
+- **Implementation:**
+  - Retrieved secrets from kv-binplatform-stg (database-url, redis-url)
+  - Created `binplatform` database on psql-binplatform-staging
+  - Migrated 94-table schema with PostgreSQL partitioning (monthly windows for collection_events, acquisition_attempts, evidence_captures, security_events)
+  - Enabled extensions: UUID-OSSP, PGCRYPTO
+  - Configured Container App revision 0000005 with environment variables
+  - Hardened security: Public access disabled, firewall rules cleaned, secrets in Key Vault
+- **Rationale:** Enable database and cache connectivity for API service
+- **Challenge Resolved:** Partition table trigger dependency — patched migration query to exclude partition children (NOT t.relispartition)
+- **Outcome:** ✅ Database connected, Redis configured, 94 tables created, health endpoint responding
+- **Known Issue Flagged:** Application code: ReferenceError: require is not defined (ESM vs CommonJS) — requires dev team investigation
+- **Testing:** Health endpoint (HTTP 200), councils endpoint (HTTP 200), database connectivity verified
+- **Sign-off:** ✅ Approved (Infrastructure complete, app issue documented for follow-up)
 - **Rationale:** Production readiness requires validated performance under stress and incident procedures
 - **Trade-off:** Requires production-like environment; costs for Azure load testing
 - **Sign-off:** Approved
