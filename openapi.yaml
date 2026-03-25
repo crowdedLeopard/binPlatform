@@ -1,0 +1,1019 @@
+openapi: 3.1.0
+info:
+  title: Hampshire Bin Collection API
+  version: 1.0.0
+  description: |
+    API for accessing bin collection schedules across Hampshire local councils.
+    
+    ## Authentication
+    
+    Public endpoints require an API key passed via the `X-API-Key` header.
+    Admin endpoints require a JWT bearer token.
+    
+    ## Rate Limiting
+    
+    Default rate limit is 60 requests per minute per API key.
+    Rate limit headers are included in all responses.
+    
+    ## Errors
+    
+    All errors follow a consistent format with `code`, `message`, and optional `details`.
+  contact:
+    name: Hampshire Bins Platform
+    email: support@hampshire-bins.example.com
+  license:
+    name: MIT
+    identifier: MIT
+
+servers:
+  - url: https://api.hampshire-bins.example.com
+    description: Production
+  - url: https://staging-api.hampshire-bins.example.com
+    description: Staging
+  - url: http://localhost:3000
+    description: Local development
+
+tags:
+  - name: Councils
+    description: Council information and health
+  - name: Properties
+    description: Property and address operations
+  - name: Collections
+    description: Bin collection schedules
+  - name: Admin
+    description: Administrative operations (requires admin auth)
+
+security:
+  - ApiKeyAuth: []
+
+paths:
+  /v1/councils:
+    get:
+      operationId: listCouncils
+      summary: List all councils
+      description: Returns a list of all supported Hampshire councils with adapter status.
+      tags: [Councils]
+      parameters:
+        - name: status
+          in: query
+          description: Filter by adapter status
+          schema:
+            type: string
+            enum: [active, beta, development, disabled, unsupported]
+      responses:
+        '200':
+          description: List of councils
+          headers:
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Council'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/RateLimitExceeded'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /v1/councils/{councilId}:
+    get:
+      operationId: getCouncil
+      summary: Get council details
+      description: Returns detailed information about a specific council.
+      tags: [Councils]
+      parameters:
+        - name: councilId
+          in: path
+          required: true
+          description: Council identifier
+          schema:
+            type: string
+            pattern: '^[a-z][a-z0-9-]*[a-z0-9]$'
+            example: basingstoke
+      responses:
+        '200':
+          description: Council details
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    $ref: '#/components/schemas/CouncilDetail'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /v1/postcodes/{postcode}/addresses:
+    get:
+      operationId: lookupAddresses
+      summary: Lookup addresses by postcode
+      description: |
+        Returns a list of addresses for the given postcode.
+        The postcode is used to determine the council, which then performs the lookup.
+      tags: [Properties]
+      parameters:
+        - name: postcode
+          in: path
+          required: true
+          description: UK postcode (spaces optional)
+          schema:
+            type: string
+            pattern: '^[A-Za-z]{1,2}[0-9][0-9A-Za-z]?\s?[0-9][A-Za-z]{2}$'
+            example: SO23 8QT
+        - name: addressFragment
+          in: query
+          description: Optional address text to filter results
+          schema:
+            type: string
+            maxLength: 100
+      responses:
+        '200':
+          description: List of addresses
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AddressCandidate'
+                  meta:
+                    $ref: '#/components/schemas/AcquisitionMeta'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          description: No addresses found or postcode not in supported area
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/RateLimitExceeded'
+        '502':
+          $ref: '#/components/responses/UpstreamError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /v1/properties/{propertyId}/collections:
+    get:
+      operationId: getCollections
+      summary: Get collection events for a property
+      description: |
+        Returns upcoming bin collection events for the specified property.
+        Events are sorted by collection date ascending.
+      tags: [Collections]
+      parameters:
+        - name: propertyId
+          in: path
+          required: true
+          description: Property identifier (UUID)
+          schema:
+            type: string
+            format: uuid
+        - name: from
+          in: query
+          description: Start date (inclusive, ISO 8601)
+          schema:
+            type: string
+            format: date
+            example: '2026-03-25'
+        - name: to
+          in: query
+          description: End date (inclusive, ISO 8601)
+          schema:
+            type: string
+            format: date
+            example: '2026-04-25'
+        - name: serviceType
+          in: query
+          description: Filter by service type
+          schema:
+            type: string
+            enum:
+              - general_waste
+              - recycling
+              - garden_waste
+              - food_waste
+              - glass
+              - paper
+              - plastic
+              - textiles
+              - other
+      responses:
+        '200':
+          description: List of collection events
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CollectionEvent'
+                  meta:
+                    $ref: '#/components/schemas/CollectionMeta'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/RateLimitExceeded'
+        '502':
+          $ref: '#/components/responses/UpstreamError'
+
+  /v1/properties/{propertyId}/services:
+    get:
+      operationId: getServices
+      summary: Get collection services for a property
+      description: Returns the bin collection services available at the specified property.
+      tags: [Collections]
+      parameters:
+        - name: propertyId
+          in: path
+          required: true
+          description: Property identifier (UUID)
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: List of collection services
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CollectionService'
+                  meta:
+                    $ref: '#/components/schemas/AcquisitionMeta'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/RateLimitExceeded'
+        '502':
+          $ref: '#/components/responses/UpstreamError'
+
+  /v1/councils/{councilId}/health:
+    get:
+      operationId: getCouncilHealth
+      summary: Get adapter health for a council
+      description: Returns the current health status of the council's data adapter.
+      tags: [Councils]
+      parameters:
+        - name: councilId
+          in: path
+          required: true
+          description: Council identifier
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Adapter health status
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    $ref: '#/components/schemas/AdapterHealth'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ==========================================================================
+  # ADMIN ENDPOINTS
+  # ==========================================================================
+
+  /v1/admin/adapters:
+    get:
+      operationId: listAdapters
+      summary: List all adapters
+      description: Returns detailed information about all registered adapters.
+      tags: [Admin]
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: List of adapters with detailed status
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AdapterInfo'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /v1/admin/acquisition-attempts/{id}:
+    get:
+      operationId: getAcquisitionAttempt
+      summary: Get acquisition attempt details
+      description: Returns detailed information about a specific data acquisition attempt.
+      tags: [Admin]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Acquisition attempt ID (UUID)
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Acquisition attempt details
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    $ref: '#/components/schemas/AcquisitionAttempt'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /v1/admin/security/events:
+    get:
+      operationId: listSecurityEvents
+      summary: List security events
+      description: Returns security events with filtering and pagination.
+      tags: [Admin]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: eventType
+          in: query
+          description: Filter by event type
+          schema:
+            type: string
+            enum:
+              - auth_failure
+              - auth_success
+              - rate_limit_exceeded
+              - suspicious_input
+              - adapter_security_warning
+              - bot_detection_triggered
+              - schema_drift_detected
+        - name: severity
+          in: query
+          description: Filter by minimum severity
+          schema:
+            type: string
+            enum: [info, warning, error, critical]
+        - name: since
+          in: query
+          description: Events since timestamp (ISO 8601)
+          schema:
+            type: string
+            format: date-time
+        - name: limit
+          in: query
+          description: Maximum number of events to return
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 100
+        - name: cursor
+          in: query
+          description: Pagination cursor
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of security events
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, pagination]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/SecurityEvent'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /v1/admin/audit:
+    get:
+      operationId: listAuditEntries
+      summary: List audit log entries
+      description: Returns audit log entries with filtering and pagination.
+      tags: [Admin]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: action
+          in: query
+          description: Filter by action
+          schema:
+            type: string
+        - name: resourceType
+          in: query
+          description: Filter by resource type
+          schema:
+            type: string
+        - name: actorId
+          in: query
+          description: Filter by actor ID
+          schema:
+            type: string
+        - name: since
+          in: query
+          description: Entries since timestamp (ISO 8601)
+          schema:
+            type: string
+            format: date-time
+        - name: limit
+          in: query
+          description: Maximum number of entries to return
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 100
+        - name: cursor
+          in: query
+          description: Pagination cursor
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of audit entries
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, pagination]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AuditEntry'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: |
+        API key for public endpoints. Obtain from the platform administrators.
+        Format: `hb_live_xxxxxxxxxxxxxxxxxxxx` (32 characters after prefix)
+    
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        JWT token for admin endpoints. Obtained via OAuth 2.0 flow.
+        Token must include `admin` scope.
+
+  headers:
+    X-RateLimit-Limit:
+      description: Request limit per minute
+      schema:
+        type: integer
+        example: 60
+    X-RateLimit-Remaining:
+      description: Remaining requests in current window
+      schema:
+        type: integer
+        example: 45
+    X-RateLimit-Reset:
+      description: Unix timestamp when rate limit resets
+      schema:
+        type: integer
+        example: 1711364400
+
+  schemas:
+    Council:
+      type: object
+      required: [id, name, shortName, adapterStatus]
+      properties:
+        id:
+          type: string
+          description: Unique council identifier
+          example: basingstoke
+        name:
+          type: string
+          description: Official council name
+          example: Basingstoke and Deane Borough Council
+        shortName:
+          type: string
+          description: Short display name
+          example: Basingstoke
+        website:
+          type: string
+          format: uri
+          description: Council website URL
+        adapterStatus:
+          type: string
+          enum: [active, beta, development, disabled, unsupported]
+          description: Current adapter status
+
+    CouncilDetail:
+      allOf:
+        - $ref: '#/components/schemas/Council'
+        - type: object
+          properties:
+            binInfoUrl:
+              type: string
+              format: uri
+              description: URL to bin collection lookup page
+            supportedServiceTypes:
+              type: array
+              items:
+                type: string
+              description: Service types supported by this council
+            lookupMethod:
+              type: string
+              enum: [api, hidden_json, html_form, pdf_calendar, browser_automation]
+              description: Method used to acquire data
+
+    AddressCandidate:
+      type: object
+      required: [id, address, postcode, councilId]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Property identifier for subsequent lookups
+        councilLocalId:
+          type: string
+          description: Council-specific property identifier
+        uprn:
+          type: string
+          description: Unique Property Reference Number (if available)
+        address:
+          type: string
+          description: Full address
+          example: "Flat 2, 15 High Street, Winchester, SO23 8QT"
+        postcode:
+          type: string
+          description: Postcode
+          example: SO23 8QT
+        councilId:
+          type: string
+          description: Council identifier
+
+    CollectionService:
+      type: object
+      required: [id, serviceType, name, isActive]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Service identifier
+        serviceType:
+          type: string
+          enum:
+            - general_waste
+            - recycling
+            - garden_waste
+            - food_waste
+            - glass
+            - paper
+            - plastic
+            - textiles
+            - other
+          description: Normalised service type
+        name:
+          type: string
+          description: Display name
+          example: Household Waste
+        frequency:
+          type: string
+          description: Collection frequency
+          example: fortnightly
+        containerType:
+          type: string
+          description: Container type
+          example: 240L wheeled bin
+        containerColour:
+          type: string
+          description: Container colour
+          example: green
+        isActive:
+          type: boolean
+          description: Whether service is currently active
+        requiresSubscription:
+          type: boolean
+          description: Whether service requires paid subscription
+
+    CollectionEvent:
+      type: object
+      required: [id, serviceType, collectionDate, isConfirmed]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Event identifier
+        serviceId:
+          type: string
+          format: uuid
+          description: Associated service identifier
+        serviceType:
+          type: string
+          enum:
+            - general_waste
+            - recycling
+            - garden_waste
+            - food_waste
+            - glass
+            - paper
+            - plastic
+            - textiles
+            - other
+          description: Normalised service type
+        serviceName:
+          type: string
+          description: Service display name
+        collectionDate:
+          type: string
+          format: date
+          description: Collection date
+          example: '2026-03-28'
+        timeWindow:
+          type: object
+          properties:
+            start:
+              type: string
+              pattern: '^[0-2][0-9]:[0-5][0-9]$'
+              example: '07:00'
+            end:
+              type: string
+              pattern: '^[0-2][0-9]:[0-5][0-9]$'
+              example: '15:00'
+        isConfirmed:
+          type: boolean
+          description: Whether date is confirmed
+        isRescheduled:
+          type: boolean
+          description: Whether collection was rescheduled
+        rescheduleReason:
+          type: string
+          description: Reason for rescheduling (e.g., bank holiday)
+        notes:
+          type: string
+          description: Additional notes
+
+    AdapterHealth:
+      type: object
+      required: [councilId, status, checkedAt]
+      properties:
+        councilId:
+          type: string
+        status:
+          type: string
+          enum: [healthy, degraded, unhealthy, unknown]
+        lastSuccessAt:
+          type: string
+          format: date-time
+        lastFailureAt:
+          type: string
+          format: date-time
+        successRate24h:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: Success rate over last 24 hours
+        avgResponseTimeMs:
+          type: number
+          description: Average response time in milliseconds
+        checkedAt:
+          type: string
+          format: date-time
+          description: When health was last checked
+
+    AdapterInfo:
+      type: object
+      required: [councilId, version, enabled, health]
+      properties:
+        councilId:
+          type: string
+        version:
+          type: string
+        enabled:
+          type: boolean
+        lookupMethod:
+          type: string
+        riskLevel:
+          type: string
+          enum: [low, medium, high, critical]
+        requiresBrowserAutomation:
+          type: boolean
+        health:
+          $ref: '#/components/schemas/AdapterHealth'
+
+    AcquisitionAttempt:
+      type: object
+      required: [id, councilId, operationType, status, startedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        councilId:
+          type: string
+        propertyId:
+          type: string
+          format: uuid
+        operationType:
+          type: string
+        lookupMethod:
+          type: string
+        status:
+          type: string
+          enum: [pending, running, success, failure, timeout, cancelled]
+        failureCategory:
+          type: string
+        errorMessage:
+          type: string
+        httpRequestCount:
+          type: integer
+        bytesReceived:
+          type: integer
+        durationMs:
+          type: integer
+        confidence:
+          type: number
+        startedAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
+        evidenceRef:
+          type: string
+          format: uuid
+
+    SecurityEvent:
+      type: object
+      required: [id, eventType, severity, source, occurredAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        eventType:
+          type: string
+        severity:
+          type: string
+          enum: [info, warning, error, critical]
+        source:
+          type: string
+        actorType:
+          type: string
+        actorId:
+          type: string
+        resourceType:
+          type: string
+        resourceId:
+          type: string
+        details:
+          type: object
+        correlationId:
+          type: string
+        occurredAt:
+          type: string
+          format: date-time
+
+    AuditEntry:
+      type: object
+      required: [id, action, resourceType, actorType, occurredAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        action:
+          type: string
+        resourceType:
+          type: string
+        resourceId:
+          type: string
+        actorType:
+          type: string
+        actorId:
+          type: string
+        metadata:
+          type: object
+        correlationId:
+          type: string
+        occurredAt:
+          type: string
+          format: date-time
+
+    AcquisitionMeta:
+      type: object
+      properties:
+        councilId:
+          type: string
+        lookupMethod:
+          type: string
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+        durationMs:
+          type: integer
+        fromCache:
+          type: boolean
+        warnings:
+          type: array
+          items:
+            type: string
+
+    CollectionMeta:
+      allOf:
+        - $ref: '#/components/schemas/AcquisitionMeta'
+        - type: object
+          properties:
+            dataFreshnessHours:
+              type: number
+              description: Hours since data was last fetched
+            nextRefreshAt:
+              type: string
+              format: date-time
+
+    Pagination:
+      type: object
+      required: [hasMore]
+      properties:
+        hasMore:
+          type: boolean
+        nextCursor:
+          type: string
+        totalCount:
+          type: integer
+
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          description: Machine-readable error code
+          example: INVALID_POSTCODE
+        message:
+          type: string
+          description: Human-readable error message
+          example: The postcode format is invalid
+        details:
+          type: object
+          description: Additional error details
+          additionalProperties: true
+        correlationId:
+          type: string
+          description: Request correlation ID for support
+
+  responses:
+    BadRequest:
+      description: Invalid request parameters
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: VALIDATION_ERROR
+            message: Invalid request parameters
+            details:
+              postcode: "Must be a valid UK postcode"
+
+    Unauthorized:
+      description: Missing or invalid authentication
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: UNAUTHORIZED
+            message: Invalid or missing API key
+
+    Forbidden:
+      description: Insufficient permissions
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: FORBIDDEN
+            message: Insufficient permissions for this operation
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: NOT_FOUND
+            message: The requested resource was not found
+
+    RateLimitExceeded:
+      description: Rate limit exceeded
+      headers:
+        X-RateLimit-Limit:
+          $ref: '#/components/headers/X-RateLimit-Limit'
+        X-RateLimit-Remaining:
+          $ref: '#/components/headers/X-RateLimit-Remaining'
+        X-RateLimit-Reset:
+          $ref: '#/components/headers/X-RateLimit-Reset'
+        Retry-After:
+          description: Seconds until rate limit resets
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: RATE_LIMIT_EXCEEDED
+            message: Rate limit exceeded. Try again later.
+
+    UpstreamError:
+      description: Error communicating with upstream council service
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: UPSTREAM_ERROR
+            message: Unable to retrieve data from council service
+            details:
+              councilId: basingstoke
+              failureCategory: network_error
+
+    ServiceUnavailable:
+      description: Service temporarily unavailable
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: SERVICE_UNAVAILABLE
+            message: Service temporarily unavailable
+
+    InternalError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: INTERNAL_ERROR
+            message: An unexpected error occurred

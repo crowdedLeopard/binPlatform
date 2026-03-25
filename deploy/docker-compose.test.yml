@@ -1,0 +1,61 @@
+version: '3.9'
+
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    environment:
+      PORT: 3000
+      NODE_ENV: test
+      DATABASE_URL: postgresql://binday_test:test_password@postgres-test:5432/binday_test
+      DATABASE_SSL: "false"
+      REDIS_URL: redis://:test_password@redis-test:6379
+      AZURE_STORAGE_CONNECTION_STRING: DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azurite-test:10000/devstoreaccount1;
+      AZURE_STORAGE_CONTAINER_NAME: test-evidence
+      LOG_LEVEL: error
+      LOG_PRETTY: "false"
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+      redis-test:
+        condition: service_healthy
+    networks:
+      - test-network
+
+  postgres-test:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: binday_test
+      POSTGRES_USER: binday_test
+      POSTGRES_PASSWORD: test_password
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U binday_test -d binday_test"]
+      interval: 3s
+      timeout: 2s
+      retries: 5
+    networks:
+      - test-network
+    tmpfs:
+      - /var/lib/postgresql/data
+
+  redis-test:
+    image: redis:7-alpine
+    command: redis-server --requirepass test_password --save "" --appendonly no
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 3s
+      timeout: 2s
+      retries: 5
+    networks:
+      - test-network
+
+  azurite-test:
+    image: mcr.microsoft.com/azure-storage/azurite:latest
+    command: azurite-blob --blobHost 0.0.0.0 --blobPort 10000 --loose --silent
+    networks:
+      - test-network
+
+networks:
+  test-network:
+    driver: bridge

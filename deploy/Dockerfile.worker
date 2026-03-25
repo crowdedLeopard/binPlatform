@@ -1,0 +1,45 @@
+# Multi-stage build for worker container with Playwright
+FROM node:20-alpine AS builder
+
+WORKDIR /build
+
+# Install build dependencies
+RUN apk add --no-cache python3 make g++
+
+COPY package*.json ./
+RUN npm ci --ignore-scripts
+
+COPY tsconfig.json ./
+COPY src ./src
+RUN npm run build
+
+RUN npm prune --production
+
+# Stage 2: Runtime with Playwright
+FROM mcr.microsoft.com/playwright:v1.42.0-jammy AS runtime
+
+# Install Node.js 20
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
+    apt-get install -y nodejs && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# Create non-root user
+RUN groupadd -r nodejs -g 1001 && \
+    useradd -r -g nodejs -u 1001 nodejs
+
+WORKDIR /app
+
+# Copy built application
+COPY --from=builder --chown=nodejs:nodejs /build/node_modules ./node_modules
+COPY --from=builder --chown=nodejs:nodejs /build/dist ./dist
+COPY --from=builder --chown=nodejs:nodejs /build/package*.json ./
+
+USER nodejs
+
+# Start worker
+CMD ["node", "dist/workers/acquisition-worker.js"]
+
+LABEL maintainer="Hampshire Bin Platform Team"
+LABEL org.opencontainers.image.title="Hampshire Bin Platform Worker"
+LABEL org.opencontainers.image.description="Acquisition worker with Playwright for browser automation"

@@ -1,0 +1,973 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://hampshire-bins.example.com/schemas/domain.json",
+  "title": "Hampshire Bin Collection Domain Model",
+  "description": "JSON Schema definitions for the Hampshire Bin Collection Data Platform domain model",
+  "definitions": {
+    "Council": {
+      "type": "object",
+      "description": "Local council that provides bin collection services",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique council identifier (lowercase, hyphenated)",
+          "pattern": "^[a-z][a-z0-9-]*[a-z0-9]$",
+          "examples": ["basingstoke", "test-valley", "east-hampshire"],
+          "x-sensitivity": "public"
+        },
+        "name": {
+          "type": "string",
+          "description": "Official council name",
+          "examples": ["Basingstoke and Deane Borough Council"],
+          "x-sensitivity": "public"
+        },
+        "shortName": {
+          "type": "string",
+          "description": "Short display name",
+          "examples": ["Basingstoke"],
+          "x-sensitivity": "public"
+        },
+        "website": {
+          "type": "string",
+          "format": "uri",
+          "description": "Council website URL",
+          "x-sensitivity": "public"
+        },
+        "binInfoUrl": {
+          "type": "string",
+          "format": "uri",
+          "description": "URL to bin collection lookup page",
+          "x-sensitivity": "public"
+        },
+        "areaCode": {
+          "type": "string",
+          "description": "ONS area code",
+          "x-sensitivity": "public"
+        },
+        "postcodePatterns": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Regex patterns for postcodes in this council area",
+          "x-sensitivity": "public"
+        },
+        "adapterStatus": {
+          "type": "string",
+          "enum": ["active", "beta", "development", "disabled", "unsupported"],
+          "description": "Current adapter status",
+          "x-sensitivity": "internal"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Record creation timestamp",
+          "x-sensitivity": "internal"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Record last update timestamp",
+          "x-sensitivity": "internal"
+        }
+      },
+      "required": ["id", "name", "shortName", "website", "adapterStatus"],
+      "x-retention": "permanent",
+      "x-postgresql": {
+        "tableName": "councils",
+        "primaryKey": "id",
+        "indexes": ["adapterStatus"]
+      }
+    },
+
+    "Property": {
+      "type": "object",
+      "description": "Residential or commercial property with bin collection services",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Internal stable identifier",
+          "x-sensitivity": "internal"
+        },
+        "uprn": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9]{1,12}$",
+          "description": "Unique Property Reference Number (if known)",
+          "x-sensitivity": "public"
+        },
+        "councilId": {
+          "type": "string",
+          "description": "Council this property belongs to",
+          "x-sensitivity": "public"
+        },
+        "councilLocalIds": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "councilId": { "type": "string" },
+              "localId": { "type": "string" },
+              "lastVerified": { "type": "string", "format": "date-time" }
+            },
+            "required": ["councilId", "localId"]
+          },
+          "description": "Per-council local identifiers",
+          "x-sensitivity": "internal"
+        },
+        "addressDisplay": {
+          "type": "string",
+          "description": "Human-readable full address",
+          "examples": ["Flat 2, 15 High Street, Winchester, SO23 8QT"],
+          "x-sensitivity": "internal"
+        },
+        "addressNormalised": {
+          "type": "string",
+          "description": "Normalised address for matching",
+          "x-sensitivity": "internal"
+        },
+        "addressLine1": {
+          "type": ["string", "null"],
+          "description": "First line of address",
+          "x-sensitivity": "internal"
+        },
+        "addressLine2": {
+          "type": ["string", "null"],
+          "description": "Second line of address",
+          "x-sensitivity": "internal"
+        },
+        "addressLine3": {
+          "type": ["string", "null"],
+          "description": "Third line of address",
+          "x-sensitivity": "internal"
+        },
+        "town": {
+          "type": ["string", "null"],
+          "description": "Town or city",
+          "x-sensitivity": "internal"
+        },
+        "postcode": {
+          "type": "string",
+          "pattern": "^[A-Z]{1,2}[0-9][0-9A-Z]? ?[0-9][A-Z]{2}$",
+          "description": "UK postcode",
+          "x-sensitivity": "public"
+        },
+        "lastCollectionFetch": {
+          "type": ["string", "null"],
+          "format": "date-time",
+          "description": "Last time collection data was fetched",
+          "x-sensitivity": "internal"
+        },
+        "collectionFetchCount": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of times collection data has been fetched",
+          "x-sensitivity": "internal"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Record creation timestamp",
+          "x-sensitivity": "internal"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Record last update timestamp",
+          "x-sensitivity": "internal"
+        }
+      },
+      "required": ["id", "councilId", "addressDisplay", "addressNormalised", "postcode"],
+      "x-retention": "2 years after last access",
+      "x-postgresql": {
+        "tableName": "properties",
+        "primaryKey": "id",
+        "indexes": ["uprn", "councilId", "postcode", "addressNormalised"],
+        "partitioning": null
+      }
+    },
+
+    "AddressCandidate": {
+      "type": "object",
+      "description": "Address candidate returned from property lookup (not persisted)",
+      "properties": {
+        "councilLocalId": {
+          "type": "string",
+          "description": "Council-specific local identifier",
+          "x-sensitivity": "internal"
+        },
+        "uprn": {
+          "type": ["string", "null"],
+          "description": "UPRN if provided by council",
+          "x-sensitivity": "public"
+        },
+        "addressRaw": {
+          "type": "string",
+          "description": "Address as returned by council",
+          "x-sensitivity": "internal"
+        },
+        "addressNormalised": {
+          "type": "string",
+          "description": "Normalised address for matching",
+          "x-sensitivity": "internal"
+        },
+        "addressDisplay": {
+          "type": "string",
+          "description": "Display-friendly address",
+          "x-sensitivity": "internal"
+        },
+        "postcode": {
+          "type": "string",
+          "description": "Postcode",
+          "x-sensitivity": "public"
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Confidence in address match",
+          "x-sensitivity": "internal"
+        }
+      },
+      "required": ["councilLocalId", "addressRaw", "addressDisplay", "postcode", "confidence"],
+      "x-retention": "transient (not persisted)",
+      "x-postgresql": null
+    },
+
+    "CollectionService": {
+      "type": "object",
+      "description": "Bin collection service type available at a property",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Internal service identifier",
+          "x-sensitivity": "internal"
+        },
+        "propertyId": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Property this service belongs to",
+          "x-sensitivity": "internal"
+        },
+        "councilId": {
+          "type": "string",
+          "description": "Council providing this service",
+          "x-sensitivity": "public"
+        },
+        "serviceType": {
+          "type": "string",
+          "enum": [
+            "general_waste", "recycling", "garden_waste", "food_waste",
+            "glass", "paper", "plastic", "textiles", "bulky_waste",
+            "clinical_waste", "hazardous_waste", "electrical_waste", "other"
+          ],
+          "description": "Normalised service type",
+          "x-sensitivity": "public"
+        },
+        "serviceNameRaw": {
+          "type": "string",
+          "description": "Council's name for this service",
+          "x-sensitivity": "public"
+        },
+        "serviceNameDisplay": {
+          "type": "string",
+          "description": "Display-friendly service name",
+          "x-sensitivity": "public"
+        },
+        "frequency": {
+          "type": ["string", "null"],
+          "description": "Collection frequency",
+          "examples": ["weekly", "fortnightly", "monthly"],
+          "x-sensitivity": "public"
+        },
+        "containerType": {
+          "type": ["string", "null"],
+          "description": "Container type",
+          "examples": ["240L wheeled bin", "55L box", "food caddy"],
+          "x-sensitivity": "public"
+        },
+        "containerColour": {
+          "type": ["string", "null"],
+          "description": "Container colour",
+          "x-sensitivity": "public"
+        },
+        "isActive": {
+          "type": "boolean",
+          "description": "Whether service is currently active",
+          "x-sensitivity": "public"
+        },
+        "requiresSubscription": {
+          "type": "boolean",
+          "description": "Whether service requires paid subscription",
+          "x-sensitivity": "public"
+        },
+        "notes": {
+          "type": ["string", "null"],
+          "description": "Service-specific notes",
+          "x-sensitivity": "public"
+        },
+        "lastFetchedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When this service data was last fetched",
+          "x-sensitivity": "internal"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Record creation timestamp",
+          "x-sensitivity": "internal"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Record last update timestamp",
+          "x-sensitivity": "internal"
+        }
+      },
+      "required": ["id", "propertyId", "councilId", "serviceType", "serviceNameDisplay", "isActive"],
+      "x-retention": "with property",
+      "x-postgresql": {
+        "tableName": "collection_services",
+        "primaryKey": "id",
+        "foreignKeys": { "propertyId": "properties(id)" },
+        "indexes": ["propertyId", "councilId", "serviceType"]
+      }
+    },
+
+    "CollectionEvent": {
+      "type": "object",
+      "description": "Scheduled bin collection event",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Internal event identifier",
+          "x-sensitivity": "internal"
+        },
+        "propertyId": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Property this event belongs to",
+          "x-sensitivity": "internal"
+        },
+        "serviceId": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Service this event belongs to",
+          "x-sensitivity": "internal"
+        },
+        "councilId": {
+          "type": "string",
+          "description": "Council providing this event",
+          "x-sensitivity": "public"
+        },
+        "serviceType": {
+          "type": "string",
+          "enum": [
+            "general_waste", "recycling", "garden_waste", "food_waste",
+            "glass", "paper", "plastic", "textiles", "bulky_waste",
+            "clinical_waste", "hazardous_waste", "electrical_waste", "other"
+          ],
+          "description": "Normalised service type",
+          "x-sensitivity": "public"
+        },
+        "collectionDate": {
+          "type": "string",
+          "format": "date",
+          "description": "Collection date (ISO 8601 date)",
+          "x-sensitivity": "public"
+        },
+        "timeWindowStart": {
+          "type": ["string", "null"],
+          "pattern": "^[0-2][0-9]:[0-5][0-9]$",
+          "description": "Time window start (HH:MM)",
+          "x-sensitivity": "public"
+        },
+        "timeWindowEnd": {
+          "type": ["string", "null"],
+          "pattern": "^[0-2][0-9]:[0-5][0-9]$",
+          "description": "Time window end (HH:MM)",
+          "x-sensitivity": "public"
+        },
+        "isConfirmed": {
+          "type": "boolean",
+          "description": "Whether date is confirmed vs provisional",
+          "x-sensitivity": "public"
+        },
+        "isRescheduled": {
+          "type": "boolean",
+          "description": "Whether collection was rescheduled",
+          "x-sensitivity": "public"
+        },
+        "originalDate": {
+          "type": ["string", "null"],
+          "format": "date",
+          "description": "Original date if rescheduled",
+          "x-sensitivity": "public"
+        },
+        "rescheduleReason": {
+          "type": ["string", "null"],
+          "description": "Reason for rescheduling",
+          "x-sensitivity": "public"
+        },
+        "notes": {
+          "type": ["string", "null"],
+          "description": "Event-specific notes",
+          "x-sensitivity": "public"
+        },
+        "sourceAttemptId": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Acquisition attempt that created this event",
+          "x-sensitivity": "internal"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Record creation timestamp",
+          "x-sensitivity": "internal"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Record last update timestamp",
+          "x-sensitivity": "internal"
+        }
+      },
+      "required": ["id", "propertyId", "serviceId", "councilId", "serviceType", "collectionDate", "isConfirmed"],
+      "x-retention": "90 days after collectionDate",
+      "x-postgresql": {
+        "tableName": "collection_events",
+        "primaryKey": "id",
+        "foreignKeys": {
+          "propertyId": "properties(id)",
+          "serviceId": "collection_services(id)"
+        },
+        "indexes": ["propertyId", "collectionDate", "councilId"],
+        "partitioning": "RANGE (collectionDate)"
+      }
+    },
+
+    "AcquisitionAttempt": {
+      "type": "object",
+      "description": "Record of a data acquisition attempt",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Unique attempt identifier",
+          "x-sensitivity": "internal"
+        },
+        "councilId": {
+          "type": "string",
+          "description": "Target council",
+          "x-sensitivity": "internal"
+        },
+        "propertyId": {
+          "type": ["string", "null"],
+          "format": "uuid",
+          "description": "Target property (if applicable)",
+          "x-sensitivity": "internal"
+        },
+        "adapterId": {
+          "type": "string",
+          "description": "Adapter used",
+          "x-sensitivity": "internal"
+        },
+        "adapterVersion": {
+          "type": "string",
+          "description": "Adapter version",
+          "x-sensitivity": "internal"
+        },
+        "operationType": {
+          "type": "string",
+          "enum": ["address_lookup", "services_fetch", "events_fetch", "health_check"],
+          "description": "Type of operation attempted",
+          "x-sensitivity": "internal"
+        },
+        "lookupMethod": {
+          "type": "string",
+          "enum": ["api", "hidden_json", "html_form", "pdf_calendar", "browser_automation", "unsupported", "unknown"],
+          "description": "Method used for acquisition",
+          "x-sensitivity": "internal"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "running", "success", "failure", "timeout", "cancelled"],
+          "description": "Attempt status",
+          "x-sensitivity": "internal"
+        },
+        "failureCategory": {
+          "type": ["string", "null"],
+          "enum": [
+            "network_error", "client_error", "server_error", "parse_error",
+            "validation_error", "rate_limited", "bot_detection", "schema_drift",
+            "adapter_error", "timeout", "auth_required", "not_found", "unknown", null
+          ],
+          "description": "Failure category if failed",
+          "x-sensitivity": "internal"
+        },
+        "errorMessage": {
+          "type": ["string", "null"],
+          "description": "Error message if failed",
+          "x-sensitivity": "internal"
+        },
+        "httpStatusCode": {
+          "type": ["integer", "null"],
+          "description": "HTTP status code from upstream",
+          "x-sensitivity": "internal"
+        },
+        "httpRequestCount": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of HTTP requests made",
+          "x-sensitivity": "internal"
+        },
+        "bytesReceived": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Total bytes received",
+          "x-sensitivity": "internal"
+        },
+        "durationMs": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Execution duration in milliseconds",
+          "x-sensitivity": "internal"
+        },
+        "evidenceRef": {
+          "type": ["string", "null"],
+          "description": "Reference to stored evidence",
+          "x-sensitivity": "internal"
+        },
+        "confidence": {
+          "type": ["number", "null"],
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Confidence in result",
+          "x-sensitivity": "internal"
+        },
+        "usedBrowserAutomation": {
+          "type": "boolean",
+          "description": "Whether browser automation was used",
+          "x-sensitivity": "internal"
+        },
+        "workerId": {
+          "type": "string",
+          "description": "Worker that executed this attempt",
+          "x-sensitivity": "internal"
+        },
+        "correlationId": {
+          "type": "string",
+          "description": "Request correlation ID",
+          "x-sensitivity": "internal"
+        },
+        "startedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When attempt started",
+          "x-sensitivity": "internal"
+        },
+        "completedAt": {
+          "type": ["string", "null"],
+          "format": "date-time",
+          "description": "When attempt completed",
+          "x-sensitivity": "internal"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Record creation timestamp",
+          "x-sensitivity": "internal"
+        }
+      },
+      "required": ["id", "councilId", "adapterId", "operationType", "status", "startedAt"],
+      "x-retention": "90 days",
+      "x-postgresql": {
+        "tableName": "acquisition_attempts",
+        "primaryKey": "id",
+        "foreignKeys": { "propertyId": "properties(id)" },
+        "indexes": ["councilId", "status", "startedAt", "failureCategory"],
+        "partitioning": "RANGE (startedAt)"
+      }
+    },
+
+    "SourceEvidence": {
+      "type": "object",
+      "description": "Evidence artifact stored from acquisition",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Evidence identifier",
+          "x-sensitivity": "internal"
+        },
+        "attemptId": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Associated acquisition attempt",
+          "x-sensitivity": "internal"
+        },
+        "evidenceType": {
+          "type": "string",
+          "enum": ["html", "json", "screenshot", "pdf", "har"],
+          "description": "Type of evidence",
+          "x-sensitivity": "internal"
+        },
+        "storagePath": {
+          "type": "string",
+          "description": "Blob storage path",
+          "x-sensitivity": "restricted"
+        },
+        "contentHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$",
+          "description": "SHA-256 hash of content",
+          "x-sensitivity": "internal"
+        },
+        "sizeBytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Size in bytes",
+          "x-sensitivity": "internal"
+        },
+        "mimeType": {
+          "type": "string",
+          "description": "MIME type",
+          "x-sensitivity": "internal"
+        },
+        "containsPii": {
+          "type": "boolean",
+          "description": "Whether evidence contains PII",
+          "x-sensitivity": "internal"
+        },
+        "capturedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When evidence was captured",
+          "x-sensitivity": "internal"
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Retention expiry date",
+          "x-sensitivity": "internal"
+        }
+      },
+      "required": ["id", "attemptId", "evidenceType", "storagePath", "contentHash", "sizeBytes", "capturedAt", "expiresAt"],
+      "x-retention": "90 days",
+      "x-postgresql": {
+        "tableName": "source_evidence",
+        "primaryKey": "id",
+        "foreignKeys": { "attemptId": "acquisition_attempts(id)" },
+        "indexes": ["attemptId", "expiresAt"]
+      }
+    },
+
+    "AdapterHealth": {
+      "type": "object",
+      "description": "Health snapshot of an adapter",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Health record identifier",
+          "x-sensitivity": "internal"
+        },
+        "councilId": {
+          "type": "string",
+          "description": "Council identifier",
+          "x-sensitivity": "internal"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["healthy", "degraded", "unhealthy", "unknown"],
+          "description": "Health status",
+          "x-sensitivity": "internal"
+        },
+        "lastSuccessAt": {
+          "type": ["string", "null"],
+          "format": "date-time",
+          "description": "Last successful acquisition",
+          "x-sensitivity": "internal"
+        },
+        "lastFailureAt": {
+          "type": ["string", "null"],
+          "format": "date-time",
+          "description": "Last failed acquisition",
+          "x-sensitivity": "internal"
+        },
+        "lastFailureCategory": {
+          "type": ["string", "null"],
+          "description": "Last failure category",
+          "x-sensitivity": "internal"
+        },
+        "successRate24h": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Success rate over 24h",
+          "x-sensitivity": "internal"
+        },
+        "avgResponseTimeMs24h": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Average response time over 24h",
+          "x-sensitivity": "internal"
+        },
+        "acquisitionCount24h": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Acquisition count over 24h",
+          "x-sensitivity": "internal"
+        },
+        "upstreamReachable": {
+          "type": "boolean",
+          "description": "Whether upstream is reachable",
+          "x-sensitivity": "internal"
+        },
+        "schemaDriftDetected": {
+          "type": "boolean",
+          "description": "Whether schema drift detected",
+          "x-sensitivity": "internal"
+        },
+        "checkedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When health was checked",
+          "x-sensitivity": "internal"
+        }
+      },
+      "required": ["id", "councilId", "status", "checkedAt"],
+      "x-retention": "30 days",
+      "x-postgresql": {
+        "tableName": "adapter_health",
+        "primaryKey": "id",
+        "indexes": ["councilId", "checkedAt", "status"]
+      }
+    },
+
+    "DataFreshnessState": {
+      "type": "object",
+      "description": "Freshness state of data for a property",
+      "properties": {
+        "propertyId": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Property identifier",
+          "x-sensitivity": "internal"
+        },
+        "councilId": {
+          "type": "string",
+          "description": "Council identifier",
+          "x-sensitivity": "internal"
+        },
+        "servicesLastFetch": {
+          "type": ["string", "null"],
+          "format": "date-time",
+          "description": "When services were last fetched",
+          "x-sensitivity": "internal"
+        },
+        "servicesStale": {
+          "type": "boolean",
+          "description": "Whether services data is stale",
+          "x-sensitivity": "internal"
+        },
+        "eventsLastFetch": {
+          "type": ["string", "null"],
+          "format": "date-time",
+          "description": "When events were last fetched",
+          "x-sensitivity": "internal"
+        },
+        "eventsStale": {
+          "type": "boolean",
+          "description": "Whether events data is stale",
+          "x-sensitivity": "internal"
+        },
+        "nextRefreshDue": {
+          "type": ["string", "null"],
+          "format": "date-time",
+          "description": "When next refresh is due",
+          "x-sensitivity": "internal"
+        },
+        "refreshPriority": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10,
+          "description": "Priority for refresh (0=low, 10=urgent)",
+          "x-sensitivity": "internal"
+        }
+      },
+      "required": ["propertyId", "councilId"],
+      "x-retention": "with property",
+      "x-postgresql": {
+        "tableName": "data_freshness_state",
+        "primaryKey": "propertyId",
+        "indexes": ["nextRefreshDue", "refreshPriority"]
+      }
+    },
+
+    "SecurityEvent": {
+      "type": "object",
+      "description": "Security-relevant event for audit and alerting",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Event identifier",
+          "x-sensitivity": "restricted"
+        },
+        "eventType": {
+          "type": "string",
+          "enum": [
+            "auth_failure", "auth_success", "rate_limit_exceeded",
+            "suspicious_input", "adapter_security_warning", "bot_detection_triggered",
+            "schema_drift_detected", "evidence_access", "admin_action",
+            "config_change", "permission_denied", "data_access_anomaly"
+          ],
+          "description": "Type of security event",
+          "x-sensitivity": "restricted"
+        },
+        "severity": {
+          "type": "string",
+          "enum": ["info", "warning", "error", "critical"],
+          "description": "Event severity",
+          "x-sensitivity": "restricted"
+        },
+        "source": {
+          "type": "string",
+          "description": "Source component",
+          "x-sensitivity": "restricted"
+        },
+        "actorType": {
+          "type": "string",
+          "enum": ["anonymous", "api_client", "admin_user", "system", "adapter"],
+          "description": "Type of actor",
+          "x-sensitivity": "restricted"
+        },
+        "actorId": {
+          "type": ["string", "null"],
+          "description": "Actor identifier (redacted if sensitive)",
+          "x-sensitivity": "restricted"
+        },
+        "ipAddress": {
+          "type": ["string", "null"],
+          "description": "Client IP address (hashed for privacy)",
+          "x-sensitivity": "restricted"
+        },
+        "userAgent": {
+          "type": ["string", "null"],
+          "description": "User agent string",
+          "x-sensitivity": "restricted"
+        },
+        "resourceType": {
+          "type": ["string", "null"],
+          "description": "Resource type affected",
+          "x-sensitivity": "restricted"
+        },
+        "resourceId": {
+          "type": ["string", "null"],
+          "description": "Resource identifier",
+          "x-sensitivity": "restricted"
+        },
+        "details": {
+          "type": "object",
+          "description": "Event-specific details",
+          "x-sensitivity": "restricted"
+        },
+        "correlationId": {
+          "type": ["string", "null"],
+          "description": "Request correlation ID",
+          "x-sensitivity": "restricted"
+        },
+        "occurredAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When event occurred",
+          "x-sensitivity": "restricted"
+        }
+      },
+      "required": ["id", "eventType", "severity", "source", "actorType", "occurredAt"],
+      "x-retention": "1 year",
+      "x-postgresql": {
+        "tableName": "security_events",
+        "primaryKey": "id",
+        "indexes": ["eventType", "severity", "occurredAt", "actorId"],
+        "partitioning": "RANGE (occurredAt)"
+      }
+    },
+
+    "AuditEntry": {
+      "type": "object",
+      "description": "General audit log entry",
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Entry identifier",
+          "x-sensitivity": "restricted"
+        },
+        "action": {
+          "type": "string",
+          "description": "Action performed",
+          "x-sensitivity": "restricted"
+        },
+        "resourceType": {
+          "type": "string",
+          "description": "Resource type",
+          "x-sensitivity": "restricted"
+        },
+        "resourceId": {
+          "type": ["string", "null"],
+          "description": "Resource identifier",
+          "x-sensitivity": "restricted"
+        },
+        "actorType": {
+          "type": "string",
+          "enum": ["anonymous", "api_client", "admin_user", "system", "adapter"],
+          "description": "Type of actor",
+          "x-sensitivity": "restricted"
+        },
+        "actorId": {
+          "type": ["string", "null"],
+          "description": "Actor identifier",
+          "x-sensitivity": "restricted"
+        },
+        "previousState": {
+          "type": ["object", "null"],
+          "description": "State before action",
+          "x-sensitivity": "restricted"
+        },
+        "newState": {
+          "type": ["object", "null"],
+          "description": "State after action",
+          "x-sensitivity": "restricted"
+        },
+        "metadata": {
+          "type": "object",
+          "description": "Additional metadata",
+          "x-sensitivity": "restricted"
+        },
+        "correlationId": {
+          "type": ["string", "null"],
+          "description": "Request correlation ID",
+          "x-sensitivity": "restricted"
+        },
+        "occurredAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When action occurred",
+          "x-sensitivity": "restricted"
+        }
+      },
+      "required": ["id", "action", "resourceType", "actorType", "occurredAt"],
+      "x-retention": "2 years",
+      "x-postgresql": {
+        "tableName": "audit_entries",
+        "primaryKey": "id",
+        "indexes": ["action", "resourceType", "actorId", "occurredAt"],
+        "partitioning": "RANGE (occurredAt)"
+      }
+    }
+  }
+}
