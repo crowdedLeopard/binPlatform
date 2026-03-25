@@ -1095,3 +1095,75 @@ avigateToLookupPage() — Navigate with domain validation
 - ETags/If-Modified-Since for OS Places API
 - Retry logic for transient failures
 - Metrics for API success/failure rates
+
+---
+
+### 2026-03-25: Fareham Adapter Authentication Issue Diagnosed and Fixed
+
+**Task:** Debug why Fareham adapter returns mock data instead of real collection dates.
+
+**Investigation:**
+1. ✓ Fareham adapter exists at `src/adapters/fareham/index.ts`
+2. ✓ Adapter's kill switch is OFF (should be live)
+3. ✓ API routes correctly parse `councilId:localId` format
+4. ✓ Tested API endpoint: `GET /v1/properties/fareham:synthetic_fareham_PO167DZ_1/collections`
+
+**Root Cause Identified:**
+- Fareham adapter makes SOAP request to `https://farehamgw.bartecmunicipal.com/API/CollectiveAPI.asmx`
+- Endpoint **requires authentication** (username/password via HTTP Basic Auth)
+- Without credentials, endpoint returns **HTML login page** instead of XML SOAP response
+- Adapter parser fails with error: "No Features_GetResult in SOAP response"
+- Actual issue: Response is `<!DOCTYPE html>...` not `<?xml version...`
+
+**Technical Details:**
+- Bartec Collective SOAP API endpoint: `https://farehamgw.bartecmunicipal.com/API/CollectiveAPI.asmx`
+- Expected SOAP method: `Features_Get` with `UPRN` parameter
+- Expected response structure: `Envelope > Body > Features_GetResponse > Features_GetResult`
+- Actual response when not authenticated: HTML login page with title "Log in - Fareham Borough Council"
+- Adapter supports credentials via env vars: `FAREHAM_API_USERNAME`, `FAREHAM_API_PASSWORD`
+- Credentials not set in production environment
+
+**Fix Applied:**
+1. **Updated adapter** (`src/adapters/fareham/index.ts` line 309-318):
+   - Added HTML detection before XML parsing
+   - Returns `FailureCategory.AUTH_REQUIRED` with clear error message
+   - Message: "Bartec endpoint requires authentication. Set FAREHAM_API_USERNAME and FAREHAM_API_PASSWORD environment variables."
+
+2. **Updated council registry** (`data/council-registry.json`):
+   - Added `requires_credentials: true` flag to Fareham entry
+   - Updated notes to clarify authentication requirement
+   - Documented environment variable names
+
+**Tested:**
+- ✓ Fareham adapter compiles without errors (`npx tsc --noEmit --skipLibCheck`)
+- ✓ HTML detection logic validates correctly
+- ✓ Error message is clear and actionable
+
+**Current API Behavior:**
+- Before fix: Returns 503 with error "No Features_GetResult in SOAP response"
+- After fix (not deployed yet): Will return 503 with error "Bartec endpoint requires authentication. Set FAREHAM_API_USERNAME and FAREHAM_API_PASSWORD environment variables."
+
+**Deployment Blocked:**
+- Full build fails due to **unrelated Rushmoor adapter errors** (21 TypeScript compilation errors)
+- Rushmoor has undefined references: `parseCollectionServices`, `calculateConfidence`, `cleanup`, etc.
+- Fareham changes are ready but cannot be deployed until Rushmoor is fixed
+
+**Fareham Status:**
+- ✗ **NOT returning real data** - requires Bartec API credentials from council
+- ✗ **Cannot test real SOAP response** - no access to authenticated endpoint
+- ✓ **Error handling improved** - now returns AUTH_REQUIRED instead of misleading NOT_FOUND
+- ✓ **Documentation updated** - registry clearly indicates authentication requirement
+
+**Recommendations:**
+1. **For Fareham to work:** Contact Fareham Borough Council to request Bartec API credentials
+2. **Alternative approach:** Build a web scraper for their public-facing bin lookup form at `https://www.fareham.gov.uk/housing/bins.aspx`
+3. **Pattern for other councils:** Bartec Collective is used by many UK councils - credentials unlock reusable pattern
+4. **Short term:** Keep Fareham kill switch ON until credentials obtained
+5. **Fix Rushmoor adapter** to allow deployment of Fareham improvements
+
+**Key Learning:**
+- Third-party platforms (Bartec, Whitespace, etc.) often require council partnerships
+- Always check response Content-Type before attempting XML parsing
+- HTML in SOAP response = authentication/authorization failure
+- Clear error messages help operations teams diagnose issues quickly
+

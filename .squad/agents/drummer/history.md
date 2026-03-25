@@ -777,3 +777,135 @@ curl -H "X-Admin-Key: $BOOTSTRAP_ADMIN_KEY" http://localhost:3000/v1/admin/adapt
 - Integrate with Grafana dashboards for drift visualization
 - Consider webhook notifications on drift detection
 
+
+
+---
+
+### 2026-03-25 - Southampton Adapter Enabled on Staging (BLOCKED BY INCAPSULA)
+
+**Task:** Enable Southampton adapter on live staging environment and test endpoint accessibility
+
+**Context:**
+Southampton adapter was upgraded from POSTPONED to PRODUCTION-READY in a previous session but never registered in the adapter registry. The adapter uses a direct UPRN endpoint at https://www.southampton.gov.uk/whereilive/waste-calendar?UPRN={uprn} which was discovered to bypass Incapsula's frontend protection.
+
+**Actions Taken:**
+
+1. **Local Endpoint Test (SUCCESS)**
+   - Tested Southampton endpoint from local machine with realistic browser headers
+   - Status: 200 OK
+   - Content returned: ~15KB HTML with collection data
+   - Collection keywords detected: Glass, Recycling, General Waste, Garden Waste
+   - ✓ Endpoint accessible from local IP ranges
+
+2. **Registry Activation**
+   - Uncommented SouthamptonAdapter import in src/adapters/registry.ts
+   - Uncommented factory registration: 'southampton': () => new SouthamptonAdapter()
+   - Uncommented adapter instance registration: dapterRegistry.register(new SouthamptonAdapter())
+   - TypeScript compilation: ✓ SUCCESS
+
+3. **Container Image Build & Deployment**
+   - Built image using ACR Tasks (cloud build): crbinplatformstaging.azurecr.io/binplatform-api:fd47924
+   - Image size: 3246 layers
+   - Push to ACR: ✓ SUCCESS  
+   - Updated Container App to use new image
+   - New revision: ca-binplatform-api-staging--0000013
+   - Deployment status: ✓ PROVISIONED, 100% traffic
+
+4. **Verification (Container Logs)**
+   - Container logs confirm adapter registration: "F [REGISTRY] Registered adapter: southampton"
+   - Shows in initialized adapters list: 4 total (eastleigh, rushmoor, fareham, southampton)
+   - Kill switch status: ✓ OFF (empty string as expected)
+   - Adapter loads successfully at startup
+
+5. **Live Testing from Azure (FAILED - INCAPSULA BLOCK)**
+   - Test request to Southampton UPRN endpoint from Container App
+   - Result: "Incapsula CDN blocked request — consider browser automation or reduce request rate"
+   - Error category: BOT_DETECTION / FailureCategory.BOT_DETECTION
+   - HTTP response: Likely 403 or Incapsula block page
+   - System fallback: Mock data returned with warning
+
+6. **Council Registry Update**
+   - Added dapter_status: "implemented" to Southampton entry in data/council-registry.json
+   - Updated confidence score: 0.6 → 0.8
+   - Updated notes to document UPRN endpoint discovery and Azure IP blocking
+   - Committed change: 65956e4
+
+**Findings:**
+
+**Southampton Endpoint Accessibility:**
+- ✓ Works from local/residential IP addresses
+- ✗ BLOCKED from Azure UK South Container Apps IP ranges
+- Incapsula CDN has different blocking policies based on source IP
+- Azure outbound IPs (56 IPs in UK South) appear to be on Incapsula blocklist
+- This is NOT a kill switch issue - adapter is enabled, endpoint is blocked upstream
+
+**Adapter Status:**
+- Code: ✓ PRODUCTION-READY (implements full UPRN-based collection lookup)
+- Registration: ✓ ENABLED (shows in registry logs)
+- Kill switch: ✓ OFF (environment variable set to empty string)
+- Upstream accessibility: ✗ BLOCKED (Incapsula bot detection from Azure IPs)
+- API reporting: ✓ NOW SHOWS AS IMPLEMENTED (after registry update)
+
+**Incapsula Block Characteristics:**
+- Block type: IP-based bot detection (not CAPTCHA, not rate limit)
+- Affects: Direct HTTP GET requests to /whereilive/waste-calendar endpoint
+- Does NOT affect: Local testing, residential IPs
+- Likely cause: Azure cloud provider IP ranges flagged by Incapsula
+- Block message: "Incapsula CDN blocked request"
+
+**Fareham Adapter Check:**
+- Fareham shows as registered in logs but is actually a STUB adapter
+- No real implementation exists (just placeholder)
+- Kill switch: OFF
+- Returns mock data (as expected for stub adapter)
+- NOT a production-ready adapter despite being listed
+
+**Recommendations:**
+
+**Short-term (Southampton):**
+1. ✗ DO NOT promote Southampton to production while Azure IPs are blocked
+2. Consider IP allowlisting with Southampton Council if they manage Incapsula policy
+3. Document this as a known limitation: "Works locally, blocked from Azure"
+4. Monitor if Incapsula policy changes over time
+
+**Medium-term Options:**
+1. **Proxy via residential IP:** Route Southampton requests through proxy with residential IP
+2. **Browser automation:** Use Playwright with residential proxy to appear as real browser
+3. **Third-party service:** Use bin-calendar.nova.do UPRN service (as noted in original docs)
+4. **Azure Front Door / API Management:** Try different Azure egress IPs (may also be blocked)
+5. **Request IP allowlist:** Contact Southampton Council to allowlist our Azure IP ranges
+
+**Long-term:**
+- Southampton should remain in "beta" status with documented IP blocking issue
+- Consider this a "works in dev, fails in prod" scenario
+- Useful for development/testing but not reliable for production users
+- Re-evaluate if Incapsula policy changes or if proxy solution implemented
+
+**Deliverables:**
+- ✓ Southampton adapter enabled in registry (commit fd47924)
+- ✓ Container image built and deployed to staging
+- ✓ Council registry metadata updated (commit 65956e4)
+- ✓ Endpoint tested from both local and Azure IPs
+- ✓ Incapsula block documented with evidence
+- ⏳ Decision document for inbox
+
+**Key Learning:**
+Cloud provider IP ranges (Azure, AWS, GCP) are often on CDN blocklists (Cloudflare, Incapsula, Akamai). An endpoint that works locally may be completely inaccessible from cloud infrastructure. Always test from the actual deployment environment, not just local dev machines. IP-based bot detection is more aggressive than rate limiting or CAPTCHAs - it's a hard block at the network edge.
+
+**Technical Details:**
+- Southampton adapter class: SouthamptonAdapter
+- Adapter version: 1.0.0
+- Endpoint: https://www.southampton.gov.uk/whereilive/waste-calendar?UPRN={uprn}
+- Parsing: Regex pattern /(Glass|Recycling|General Waste|Garden Waste).*?([0-9]{1,2}\/[0-9]{1,2}\/[0-9]{4})/g
+- Evidence storage: HTML response stored in evidence blob storage
+- Confidence when events found: 0.8
+- Risk level: MEDIUM (would be LOW if not for IP blocking)
+- Azure outbound IPs: 56 IPs in UK South region (20.90.x.x, 4.158.x.x, etc.)
+- Incapsula policy: IP-based blocklist, likely targets known cloud providers
+
+**Next Actions:**
+- Consider Southampton "enabled but blocked" in production
+- Do NOT promote to production users until blocking resolved
+- Monitor for policy changes
+- Investigate proxy/allowlist solutions if Southampton becomes high priority
+- Document in user-facing docs that Southampton may not work reliably

@@ -587,3 +587,124 @@ tests/
 - Registry unit tests: 17 passed ✓
 - E2E tests: Ready to run against staging API (manual execution)
 
+
+
+### 2026-03-25: Live Integration Tests for Real Data Validation
+
+**Context:**
+Platform deployed to staging at: https://ca-binplatform-api-staging.icyriver-42deda52.uksouth.azurecontainerapps.io
+
+Current state: ALL collection responses return confidence: 0.5 and warning: "Using mock data".
+
+**Test Files Created:**
+
+1. **	ests/integration/live-real-data.test.ts** (Fail-on-Mock Tests):
+   - **Purpose:** Proves when real data flows end-to-end
+   - **Behavior:** FAILS when mock data is served, PASSES when real data flows
+   - **Assertions:**
+     * confidence >= 0.8 (real data threshold)
+     * NO warning field present
+     * At least one collection date in the future
+     * Valid service types or bin_types
+   - **Test Coverage:**
+     * All 13 Hampshire councils with test postcodes
+     * API-based adapters (Eastleigh, Fareham) expect confidence >= 0.9
+     * PDF-based adapters (East Hampshire) expect  .7 <= confidence < 0.9
+     * Comprehensive mock data detection test
+   - **Expected Result:** Currently FAILS for all councils (proving mock data detection works)
+   - **Future:** As Naomi/Alex fix adapters, tests will start passing
+
+2. **	ests/integration/live-mock-fallback.test.ts** (Accept-Mock Tests):
+   - **Purpose:** Validates API response structure regardless of data source
+   - **Behavior:** PASSES with either real OR mock data (confidence >= 0.5)
+   - **Assertions:**
+     * Response structure is valid JSON
+     * Confidence field present (0.5-1.0)
+     * Collections array present with valid structure
+     * Date fields are ISO 8601 and parseable
+     * Service types or bin_types are valid
+     * No 500 errors (all errors are bugs)
+     * All responses are JSON (never HTML)
+   - **Test Coverage:**
+     * Address lookup response structure
+     * Collections response structure
+     * Error handling (400 validation, 404 not found, 503 unavailable)
+     * Resilience (no 500s, all JSON)
+     * Date format validation
+   - **Expected Result:** Currently PASSES (validates mock data is well-formed)
+   - **Future:** Continues to pass as adapters are fixed
+
+**Test Configuration:**
+- Framework: Vitest
+- Tagged: @live for selective execution
+- Execution: RUN_LIVE_TESTS=true environment variable required
+- Skipped in CI by default (requires live API access)
+- Base URL: Configurable via API_BASE_URL env var
+- Timeout: 30-120s per test (live API calls)
+
+**Response Field Handling:**
+Tests handle field name variations:
+- Collection dates: collectionDate, collection_date, date
+- Service types: serviceType, service_type, in_types[]
+- Address: councilLocalId, council_local_id
+- Addresses: ddressDisplay, ddress_display
+
+**E2E Test Results (Against Live Staging API):**
+Ran 	ests/e2e/collection-flow.test.ts against staging:
+- **Total:** 10 tests
+- **Passed:** 7 ✓
+- **Failed:** 3 ✗
+
+**Passing Tests:**
+1. ✓ Address lookup with councilId (Eastleigh)
+2. ✓ Address lookup without councilId
+3. ✓ Invalid postcode returns 400
+4. ✓ Invalid property ID format returns 400/404
+5. ✓ Services endpoint returns data or 503/404
+6. ✓ No 500 errors (all endpoints)
+7. ✓ All responses are JSON (never HTML)
+
+**Failing Tests:**
+1. ✗ Kill-switched council (basingstoke-deane) doesn't explain kill switch in message
+2. ✗ Unknown council (does-not-exist) returns 200 instead of 404
+3. ✗ Collections endpoint: collection_date field undefined (API uses date instead)
+
+**Live API Observations:**
+Sample response from GET /v1/properties/eastleigh:100060321174/collections:
+- Returns mock data: "confidence": 0.5
+- Warning present: "Using mock data - upstream council website has bot protection"
+- Failure reason: "Unexpected content-type: application/pdf;charset=UTF-8"
+- Collections array: 16 entries with future dates (2026-04-06 onwards)
+- Field names: date (not collection_date), in_types[] (not service_type)
+- Bin types: general_waste, ecycling, ood_waste
+
+**Build Status:**
+- ✓ TypeScript compilation successful for test files
+- ✓ Existing integration tests pass (confidence.test.ts: 15/15)
+- Note: Main source has unrelated compilation error in src/adapters/eastleigh/index.ts (not from our changes)
+
+**Test Execution:**
+`ash
+# Run live real-data tests (currently fail)
+RUN_LIVE_TESTS=true npx vitest run tests/integration/live-real-data.test.ts
+
+# Run live mock-fallback tests (currently pass)
+RUN_LIVE_TESTS=true npx vitest run tests/integration/live-mock-fallback.test.ts
+
+# Run E2E tests against live staging
+API_BASE_URL="https://ca-binplatform-api-staging..." npx tsx tests/e2e/collection-flow.test.ts
+`
+
+**Success Metrics:**
+- **Now:** live-real-data.test.ts fails (proving mock detection works)
+- **When Fixed:** live-real-data.test.ts passes (proving real data flows)
+- **Always:** live-mock-fallback.test.ts passes (structure validation)
+
+**Next Steps:**
+- Naomi/Alex: Fix adapters to serve real data (not mock)
+- Target: Eastleigh first (API-based, should be easiest)
+- Monitor: As adapters fixed, live-real-data.test.ts tests will start passing
+- Goal: All 13 councils serving real data with confidence >= 0.8
+
+**Key Learning:**
+Live integration tests designed as "canaries" that detect when real data flows. Fail-on-mock tests ensure we don't ship mock data to production.
