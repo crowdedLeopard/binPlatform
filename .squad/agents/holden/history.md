@@ -301,3 +301,101 @@ Drummer's bootstrap defaulted to Fastify, but this decision moves to Hono as the
 - Validate Southampton third-party service (bin-calendar.nova.do)
 - Add `FailureCategory.UPSTREAM_BLOCKED` distinct from `BOT_DETECTION`
 
+### 2026-03-25: Phase 4 Production Readiness Documentation
+
+**Deliverables Completed:**
+- **Production Readiness Review** (`docs/production-readiness.md`):
+  - Comprehensive review across 15 dimensions: architecture, security, reliability, observability, operations, data quality, compliance, performance
+  - Honest assessment: 3 critical gaps (Redis wiring, DB wiring, rate limiting), 7 high-priority gaps, 9 medium-priority gaps
+  - **Decision:** CONDITIONAL GO for limited beta (3 councils: Eastleigh, Fareham, Portsmouth)
+  - Maturity tiers: 3 production-ready, 5 stable, 3 needs-monitoring, 2 postponed
+  - Risk acceptance documented for browser brittleness, no Redis caching, no pentest
+  - Launch strategy: Phase 4A (3 councils, Week 1-4), Phase 4B (11 councils, Week 5-8), Phase 4C (postponed recovery, Month 3+)
+  - Success metrics: 95% uptime, ≥0.80 avg confidence, p95 <2s (cached), p95 <5s (API live), p95 <15s (browser live)
+
+- **Full API Documentation** (`docs/api/`):
+  - **README.md:** API overview with authentication, rate limits, versioning, deprecation policy, CORS, caching, security, quick start examples (Node.js, Python, cURL)
+  - **endpoints.md:** All 12 endpoints documented with request/response schemas, error codes, examples (councils, properties, collections, services, admin)
+  - **error-codes.md:** All 12 standardized error codes with HTTP status, causes, remediation, example responses
+  - **confidence-scores.md:** Full confidence scoring guide with calculation formula, thresholds (CONFIRMED/LIKELY/UNVERIFIED/STALE), when to re-query, UI integration patterns
+
+- **Adapter Definition of Done** (`docs/adapter-definition-of-done.md`):
+  - Formal DoD for each adapter status: `implemented` (production-ready), `beta` (functional but unvalidated), `degraded` (low confidence), `disabled` (kill switch), `postponed` (upstream blocking), `stub` (not implemented)
+  - **Implemented DoD:** 6 categories with 30+ checklist items (code completeness, data quality, security, testing, infrastructure, documentation)
+  - Critical requirements: full `CouncilAdapter` interface, kill switch enforced, `SELECTORS_VALIDATED=true` (browser), confidence ≥0.70, Amos security review PASS, unit tests ≥80%, no secrets
+  - Review process: self-review → peer review (Naomi) → security review (Amos) → architect review (Holden)
+  - Maintenance schedule: weekly drift monitoring, monthly selector validation, quarterly full DoD re-assessment
+  - Waiver process for rare exceptions (never for security items)
+
+- **Risk Register** (`docs/risk-register.md`):
+  - 20 active risks identified with likelihood, impact, mitigations, owner, status
+  - **Critical risks:** R01 (browser adapter drift), R04 (rate limiting abuse), R05 (dependency vulnerabilities), R14 (DDoS), R07 (DB corruption)
+  - **Accepted risks:** R01 (browser brittleness), R02 (bot protection), R06 (Blob outage), R15 (scraping abuse)
+  - **Open risks:** R07 (DB disaster recovery), R08 (Redis failure), R13 (GDPR), R14 (DDoS), R20 (Terraform bugs)
+  - Risk mitigation roadmap: Week 1-2 (critical), Month 2 (high), Month 3 (medium), ongoing
+  - 3 closed risks: structured error codes, confidence scoring, audit logging (all implemented Phase 3)
+  - Escalation procedures and monitoring metrics defined
+  - Sign-off status: Holden APPROVED, Amos PENDING (R04, R13), Drummer PENDING (R07, R08, R14)
+
+- **Performance Design Notes** (`docs/performance.md`):
+  - Expected request volumes: Beta (2K/day, 1-2 RPS), Launch (20K/day, 10-15 RPS), Year 1 (230K/day, 100-150 RPS)
+  - Cache TTLs by method: API (4h), Browser (6h), PDF (24h), property resolution (24h), councils (5min), health (1min)
+  - Adapter concurrency limits: API (50 concurrent), Browser (5 concurrent), PDF (10 concurrent)
+  - Database connection pool sizing: API (9 per instance), Workers (5 per instance), total 47 connections (under 200 limit)
+  - Response time SLOs: p50 <200ms (cached), p95 <2s (cached), p95 <5s (API live), p95 <20s (browser live)
+  - Scaling strategy: vertical (increase vCPUs) vs. horizontal (add replicas); autoscaling rules at 70% CPU, 100 concurrent requests, 50 queue depth
+  - Cache effectiveness: 80-99% hit rate targets, Redis LRU eviction, memory sizing (256 MB beta → 1 GB Year 1 → 2.5 GB Year 2)
+  - Cost estimates: £75/month (beta), £455/month (Year 1), £0.000065 per request
+  - Load testing plan (Month 2): cache hit (1000 RPS, p95 <200ms), cache miss API (100 RPS, p95 <3s), cache miss browser (10 RPS, p95 <20s)
+
+- **ADR-008: Production Deployment Strategy** (`docs/adr/ADR-008-production-deployment.md`):
+  - **Decision:** Azure Container Apps for compute (vs. AKS, App Service, VMs, Functions, self-hosted)
+  - **Rationale:** Right-sized abstraction (between AKS complexity and App Service rigidity), cost-effective (scale-to-zero), Playwright support (custom base image), integrated monitoring, VNet security
+  - **Alternatives rejected:** AKS (too complex, £200/month baseline), App Service (less flexible, no scale-to-zero), VMs (high overhead), Functions (10min timeout, Playwright incompatible), self-hosted (no HA)
+  - **Architecture:** API service (public ingress, 1-10 replicas) + Worker service (no ingress, 1-5 replicas) + managed PaaS (PostgreSQL, Redis, Blob)
+  - **Validation criteria:** Playwright compatibility (Chromium launches, 2GB RAM sufficient), network connectivity (private endpoints), scaling behavior (autoscaling, cold start <5s)
+  - **Rollback plan:** Fallback to App Service (similar runtime), escalation to AKS (if scaling limits hit)
+  - **Consequences:** Rapid deployment, low overhead, cost-effective, but requires Playwright verification (newer service), vendor lock-in (Azure-specific)
+
+**Patterns Established:**
+- **Production readiness gates:** 3 critical gaps block full launch; limited beta (3 councils) acceptable with manual workarounds
+- **API-first documentation:** OpenAPI spec + human-readable docs + code examples (Node.js, Python, cURL)
+- **Adapter lifecycle:** stub → beta → implemented ↔ degraded → disabled → postponed (if upstream blocking)
+- **Risk-based prioritization:** 20 risks identified, 5 critical, 4 accepted, 5 open; mitigation roadmap with owners and ETAs
+- **Performance SLOs:** p95 latency targets by cache status (cached <2s, API live <5s, browser live <20s)
+- **Cost modeling:** Per-request economics (£0.000065/request) with 7-8x margin if monetized
+
+**Architecture Decisions:**
+- **ADR-008:** Azure Container Apps chosen for deployment platform
+  - Key trade-offs: simplicity + cost vs. control (AKS has more control but 10x complexity)
+  - Playwright compatibility validation required (Week 1 staging deployment)
+  - Scale-to-zero capability for cost savings (off-peak £0 compute)
+
+**Known Gaps Identified:**
+- **Critical (C1-C3):** Redis integration (no caching), database wiring (kill switches manual), rate limiting (no enforcement) — all Week 1-2 resolution
+- **High Priority (H1-H7):** Selector validation, CD pipeline, API key hashing, Grafana dashboards, synthetic monitoring, chaos testing, pentesting — Month 1-3 resolution
+- **Medium Priority:** User corrections, anomaly detection, GDPR assessment, ToS/Privacy, mTLS, image signing — Phase 5
+
+**Launch Readiness:**
+- **Status:** CONDITIONAL GO (limited beta: 3 councils)
+- **Blocker resolution:** C1/C2/C3 acceptable with workarounds for beta traffic (no caching, manual kill switches, close monitoring)
+- **Sign-off required:** Holden (APPROVED), Amos (PENDING), Drummer (PENDING), Product Owner (PENDING)
+- **Go-live target:** Week of 2026-04-01 (pending blocker resolution + stakeholder sign-off)
+
+**Success Criteria:**
+- 95% uptime (beta), 99% (full launch)
+- Average confidence ≥0.80
+- Drift detection <1 hour
+- Kill switch activations <2 per week
+- Zero critical security incidents
+- User feedback positive (qualitative)
+
+**Documentation Completeness:**
+- 15 dimensions of production readiness assessed
+- 12 API endpoints fully documented
+- 12 error codes standardized
+- 30+ adapter DoD checklist items
+- 20 risks identified and assessed
+- 8 ADRs (001-008) complete
+- Performance characteristics quantified
+

@@ -1,0 +1,16 @@
+# .trivyignore — Trivy vulnerability suppressions
+#
+# This file contains CVEs that are known false positives or accepted risks.
+# Each suppression must include:
+#   - CVE ID (one per line)
+#   - Date added (YYYY-MM-DD)
+#   - Justification (why this CVE is not exploitable or is accepted risk)
+#   - Reviewer (GitHub username who approved the suppression)
+#
+# Suppressions expire after 90 days and require re-review.
+#
+# Example format:
+# CVE-2023-12345  # 2025-01-15 | Not exploitable: PDF parser internal only, no external input | Reviewer: @amos
+#
+# === ACTIVE SUPPRESSIONS ===
+# (none yet)

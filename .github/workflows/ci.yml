@@ -6,6 +6,12 @@ on:
   pull_request:
     branches: [main, develop]
 
+# Explicit permissions for GITHUB_TOKEN (principle of least privilege)
+permissions:
+  contents: read
+  security-events: write
+  pull-requests: read
+
 env:
   NODE_VERSION: '20'
 
@@ -13,6 +19,9 @@ jobs:
   lint-typecheck:
     name: Lint and Type Check
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
       
@@ -37,6 +46,9 @@ jobs:
   unit-tests:
     name: Unit Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
       
@@ -62,6 +74,9 @@ jobs:
   integration-tests:
     name: Integration Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
     services:
       postgres:
         image: postgres:16-alpine
@@ -115,6 +130,9 @@ jobs:
   security-tests:
     name: Security Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
       
@@ -131,44 +149,75 @@ jobs:
         run: npm run test:security
 
   dependency-scan:
-    name: Dependency Security Scan
+    name: Dependency Vulnerability Scan
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
-      
+
       - name: Install dependencies
         run: npm ci
-      
-      - name: Run npm audit
-        run: npm audit --audit-level=moderate
-        continue-on-error: true
-      
-      - name: OWASP Dependency Check
-        uses: dependency-check/Dependency-Check_Action@main
+
+      - name: Run Trivy filesystem scan
+        uses: aquasecurity/trivy-action@master
         with:
-          project: 'hampshire-bin-platform'
-          path: '.'
-          format: 'HTML'
-          args: >
-            --enableRetired
-            --enableExperimental
-      
-      - name: Upload Dependency Check results
-        uses: actions/upload-artifact@v3
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-fs-results.sarif'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'
+          ignore-unfixed: true
+          trivyignores: '.trivyignore'
+
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:
-          name: dependency-check-report
-          path: reports
+          sarif_file: 'trivy-fs-results.sarif'
+          category: 'filesystem'
+
+      - name: npm audit (production dependencies)
+        run: npm audit --audit-level=high --production
+
+      - name: Generate dependency scan summary
+        if: always()
+        run: |
+          echo "## Dependency Scan Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Trivy Filesystem Scan:** Completed" >> $GITHUB_STEP_SUMMARY
+          echo "**npm Audit:** Completed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          npm audit --json --production 2>/dev/null | node -e "
+            try {
+              const d = JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+              const v = d.metadata?.vulnerabilities || {};
+              console.log('| Severity | Count |');
+              console.log('|----------|-------|');
+              console.log('| Critical | ' + (v.critical || 0) + ' |');
+              console.log('| High     | ' + (v.high || 0) + ' |');
+              console.log('| Moderate | ' + (v.moderate || 0) + ' |');
+              console.log('| Low      | ' + (v.low || 0) + ' |');
+            } catch (e) {
+              console.log('No vulnerability data available');
+            }
+          " >> $GITHUB_STEP_SUMMARY || echo "Unable to generate vulnerability table" >> $GITHUB_STEP_SUMMARY
 
   secret-scan:
     name: Secret Scan
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -185,6 +234,9 @@ jobs:
   lint-dockerfile:
     name: Lint Dockerfile
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
       
@@ -192,6 +244,12 @@ jobs:
         uses: hadolint/hadolint-action@v3.1.0
         with:
           dockerfile: deploy/Dockerfile
+          failure-threshold: warning
+      
+      - name: Run hadolint on Monitor Dockerfile
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: deploy/Dockerfile.monitor
           failure-threshold: warning
       
       - name: Run hadolint on Worker Dockerfile
@@ -203,6 +261,10 @@ jobs:
   build-and-scan-image:
     name: Build and Scan Docker Image
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write
     steps:
       - uses: actions/checkout@v4
       
@@ -312,6 +374,9 @@ jobs:
   adapter-kill-switch-audit:
     name: Kill Switch Audit
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
       
@@ -344,6 +409,9 @@ jobs:
   secrets-baseline:
     name: Secrets Baseline Check
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -379,6 +447,10 @@ jobs:
   dependency-check:
     name: OWASP Dependency Check
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write
     steps:
       - uses: actions/checkout@v4
       
@@ -413,6 +485,10 @@ jobs:
   iac-scan:
     name: Infrastructure as Code Scan
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write
     steps:
       - uses: actions/checkout@v4
       
@@ -433,6 +509,9 @@ jobs:
   adapter-registry-check:
     name: Adapter Registry Completeness
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
       
@@ -461,7 +540,10 @@ jobs:
   build:
     name: Build Application
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs: [lint-typecheck, unit-tests]
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
       
@@ -487,7 +569,10 @@ jobs:
   synthetic-check:
     name: Synthetic Adapter Checks
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     if: github.event_name == 'pull_request' && github.base_ref == 'main'
+    permissions:
+      contents: read
     services:
       postgres:
         image: postgres:16-alpine
@@ -571,3 +656,112 @@ jobs:
           if [ -f api.pid ]; then
             kill $(cat api.pid) || true
           fi
+
+  security-scorecard:
+    name: OSSF Security Scorecard
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      
+      - uses: ossf/scorecard-action@v2
+        with:
+          results_file: scorecard-results.sarif
+          results_format: sarif
+          publish_results: true
+      
+      - name: Upload SARIF results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: scorecard-results.sarif
+
+  license-check:
+    name: License Compliance Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Check licenses
+        run: |
+          npx license-checker \
+            --onlyAllow "MIT;Apache-2.0;BSD-2-Clause;BSD-3-Clause;ISC;0BSD;CC0-1.0;Python-2.0" \
+            --excludePrivatePackages \
+            --summary
+
+  sbom-generate:
+    name: Generate SBOM
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: anchore/sbom-action@v0
+        with:
+          path: .
+          format: spdx-json
+          output-file: sbom.spdx.json
+      
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom.spdx.json
+          retention-days: 90
+
+  container-sign:
+    name: Sign Container Images
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [build-and-scan-image]
+    permissions:
+      contents: read
+      id-token: write
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Build API image for signing
+        uses: docker/build-push-action@v5
+        id: build-api
+        with:
+          context: .
+          file: deploy/Dockerfile
+          push: false
+          load: true
+          tags: hampshire-bin-api:${{ github.sha }}
+          build-args: |
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+            GIT_COMMIT=${{ github.sha }}
+      
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+      
+      - name: Sign API image
+        run: |
+          cosign sign --yes hampshire-bin-api:${{ github.sha }}
+        env:
+          COSIGN_EXPERIMENTAL: 1

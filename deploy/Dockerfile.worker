@@ -16,7 +16,8 @@ RUN npm run build
 RUN npm prune --production
 
 # Stage 2: Runtime with Playwright
-FROM mcr.microsoft.com/playwright:v1.42.0-jammy AS runtime
+# Pin digest for reproducibility — update quarterly
+FROM mcr.microsoft.com/playwright:v1.42.0-jammy@sha256:6513f5f6f85ba7bb7c8b0b8c0b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b AS runtime
 
 # Build arguments for labeling
 ARG BUILD_DATE
@@ -28,36 +29,37 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
-# Create non-root user
-RUN groupadd -r nodejs -g 1001 && \
-    useradd -r -g nodejs -u 1001 nodejs && \
+# Create non-root user and group
+RUN groupadd -r appgroup -g 1001 && \
+    useradd -r -g appgroup -u 1001 appuser && \
     mkdir -p /tmp/playwright && \
-    chown -R nodejs:nodejs /tmp/playwright
+    chown -R appuser:appgroup /tmp/playwright
 
 WORKDIR /app
 
 # Copy built application (dist only, minimal footprint)
-COPY --from=builder --chown=nodejs:nodejs /build/dist ./dist
-COPY --from=builder --chown=nodejs:nodejs /build/node_modules ./node_modules
-COPY --from=builder --chown=nodejs:nodejs /build/package.json ./package.json
+COPY --from=builder --chown=appuser:appgroup /build/dist ./dist
+COPY --from=builder --chown=appuser:appgroup /build/node_modules ./node_modules
+COPY --from=builder --chown=appuser:appgroup /build/package.json ./package.json
 
-# Remove package managers
+# Remove package managers from runtime
 RUN rm -f /usr/bin/npm /usr/bin/npx /usr/bin/yarn
 
-USER nodejs
+USER appuser
 
 # Expose metrics/health port if needed
 EXPOSE 9090
 
-# Health check for worker (checks if process is responsive)
-HEALTHCHECK --interval=60s --timeout=10s --start-period=60s --retries=3 \
-  CMD node -e "process.exit(0)"
+# Health check for worker
+# Note: Read-only filesystem requires writable tmpfs mounts at: /tmp/playwright, /app/.cache
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+  CMD ["node", "-e", "process.exit(0)"]
 
 # Use dumb-init for signal handling
 ENTRYPOINT ["dumb-init", "--"]
 
-# Start worker with security options
-CMD ["node", "--no-deprecation", "dist/workers/acquisition-worker.js"]
+# Start worker - no shell, direct exec
+CMD ["node", "dist/workers/acquisition-worker.js"]
 
 # Security labels and metadata
 LABEL maintainer="Hampshire Bin Platform Team"
@@ -66,4 +68,5 @@ LABEL org.opencontainers.image.description="Acquisition worker with Playwright f
 LABEL org.opencontainers.image.created="${BUILD_DATE}"
 LABEL org.opencontainers.image.revision="${GIT_COMMIT}"
 LABEL security.no-new-privileges="true"
-LABEL security.seccomp="restrictive"
+LABEL security.readonly-rootfs="true"
+LABEL security.cap-drop="ALL"

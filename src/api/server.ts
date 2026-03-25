@@ -54,7 +54,25 @@ export async function buildServer() {
     originAgentCluster: true,
     permittedCrossDomainPolicies: { permittedPolicies: 'none' },
     referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
-    xssFilter: true
+    xssFilter: false,  // Deprecated header - disabled
+    permissionsPolicy: {
+      features: {
+        geolocation: [],
+        microphone: [],
+        camera: [],
+        payment: [],
+        usb: [],
+        accelerometer: [],
+        gyroscope: [],
+        magnetometer: [],
+      }
+    }
+  });
+
+  // Remove server identification headers
+  server.addHook('onSend', async (request, reply) => {
+    reply.removeHeader('Server');
+    reply.removeHeader('X-Powered-By');
   });
 
   // CORS configuration

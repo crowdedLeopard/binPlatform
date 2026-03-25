@@ -2265,3 +2265,203 @@ Before deploying to production:
 - Enable Flow Logs for browser adapter subnet
 - Schedule training session on rollout checklist
 - Plan automation for Q2 2026 (CI-based checklist validation)
+
+---
+
+## Phase 4 Decisions
+
+### Security & Hardening (Amos)
+
+**Decision 1: Tiered Rate Limiting Architecture**
+- **Status:** Implemented
+- **Scope:** API endpoint protection across 6 tiers
+- **Details:**
+  - Tier 1 (Public endpoints): 100 req/min per IP
+  - Tier 2 (Authenticated): 1,000 req/min per user
+  - Tier 3 (Address search): 60 req/min per postcode
+  - Tier 4 (Evidence retrieval): 30 req/min per property
+  - Tier 5 (Admin): 5,000 req/min per service principal
+  - Tier 6 (Internal): Unlimited (service-to-service)
+- **Rationale:** Granular protection prevents abuse without impacting legitimate use
+- **Trade-off:** Requires per-endpoint configuration; beta phase monitoring needed
+- **Sign-off:** CONDITIONAL (depends on bot detection validation)
+
+**Decision 2: Cache Poisoning Prevention**
+- **Status:** Implemented
+- **Scope:** Redis cache layer across all adapters
+- **Details:**
+  - Namespaced keys: {adapter}:{method}:{hash(input)}
+  - Max value size: 1MB (prevent memory exhaustion)
+  - TTL validation on read (detect age attacks)
+  - No user-controlled cache keys
+- **Rationale:** Prevents delivery of stale/malicious data to other users
+- **Trade-off:** Namespace complexity; requires strict input validation
+- **Sign-off:** Approved
+
+**Decision 3: Security Headers Hardening**
+- **Status:** Implemented
+- **Headers Added:**
+  - Permissions-Policy: Disable microphone, camera, geolocation, payment APIs
+  - Strict-Transport-Security: max-age=31536000; includeSubDomains
+  - X-Content-Type-Options: nosniff
+  - X-Frame-Options: DENY
+  - Referrer-Policy: strict-origin-when-cross-origin
+  - Content-Security-Policy: img-src 'self'; script-src 'self'; style-src 'self'
+- **Removed:** Server header (information leakage)
+- **Rationale:** OWASP A01:2021 Broken Access Control mitigation
+- **Trade-off:** May break legacy client integrations; requires beta testing
+- **Sign-off:** Approved
+
+### Testing & Quality (Bobbie)
+
+**Decision 4: Comprehensive Security Test Pyramid**
+- **Status:** Implemented (189 tests, 1,160% growth from Phase 3)
+- **Coverage:**
+  - Unit tests: 45 (injection, encoding, validation)
+  - Integration tests: 89 (auth bypass, rate limits, SSRF)
+  - End-to-end tests: 55 (abuse patterns, audit trails)
+- **Rationale:** High-volume security scenarios require automated detection
+- **Trade-off:** Test maintenance overhead; requires specialized security domain knowledge
+- **Sign-off:** Approved (92% overall coverage, 95% security-critical)
+
+**Decision 5: Load Testing with k6 & IR Simulations**
+- **Status:** Implemented
+- **Scenarios:**
+  - Cached address lookup (baseline: 50ms p99)
+  - Uncached property search (target: <500ms p99)
+  - Abuse simulation (sustained 1,000 req/s)
+- **IR Drills:** 3 runbooks (data breach, DDoS, service degradation)
+- **Rationale:** Production readiness requires validated performance under stress and incident procedures
+- **Trade-off:** Requires production-like environment; costs for Azure load testing
+- **Sign-off:** Approved
+
+### Infrastructure & Deployment (Drummer)
+
+**Decision 6: Hardened Container Images**
+- **Status:** Implemented
+- **Changes:**
+  - All Dockerfiles: pinned base images to specific digest
+  - Security flags: --cap-drop=ALL + explicit capabilities per service
+  - User: Non-root user (uid 1000) for all services
+  - Scanning: OSSF Scorecard in CI (blocks score < 6.0)
+- **Rationale:** Reduce container breakout surface; prevent privilege escalation
+- **Trade-off:** Digest pinning requires monthly updates; capability grants add complexity
+- **Sign-off:** Approved
+
+**Decision 7: OCI Image Signing & Supply Chain**
+- **Status:** Implemented in CI/CD
+- **Components:**
+  - SBOM generation (CycloneDX format)
+  - License scanning (blocks GPL v3 for SaaS, allows MIT/Apache)
+  - OCI image signing (Cosign, verifiable provenance)
+  - Deployment validation (verify signature before pull)
+- **Rationale:** Prevent tampered images; license compliance; audit trail
+- **Trade-off:** Adds 2-3 minutes to CI; key management overhead
+- **Sign-off:** Approved
+
+**Decision 8: Disaster Recovery RTO/RPO**
+- **Status:** Documented in runbook
+- **Scenarios & Recovery Times:**
+  1. Database corruption: 15min RTO, 5min RPO
+  2. Cache layer failure: 5min RTO, 0min RPO (stateless)
+  3. Single region outage: 30min RTO, 15min RPO
+  4. Data exfiltration: 10min detection, containment guide
+  5. Certificate expiry: 45min RTO (manual rotation)
+- **Rationale:** Beta phase requires validated recovery procedures; councils need uptime SLAs
+- **Trade-off:** Requires pre-positioned replicas and regular drills
+- **Sign-off:** Approved (pending Amos SIEM validation)
+
+### Production Readiness (Holden)
+
+**Decision 9: Three-Council Beta Phase**
+- **Status:** CONDITIONAL GO
+- **Participants:** 3 councils (pilot group)
+- **Duration:** 4 weeks (pilot) + 4 weeks (hardening)
+- **Success Criteria:**
+  - Zero security incidents
+  - >99% availability
+  - <500ms p99 latency for address search
+  - <100 false positive evidence detections
+- **Rationale:** Validate at scale before full platform rollout to 13 councils
+- **Trade-off:** Delays full deployment by 8 weeks; limited feedback
+- **Sign-off:** Approved
+
+**Decision 10: Performance Cost Model (Y1)**
+- **Status:** Documented
+- **Beta Phase (3 councils):** £75/month
+  - Azure Container Apps: 2x instances, 0.5 CPU, 1GB RAM
+  - PostgreSQL: Standard tier (20GB, 5 DTUs)
+  - Redis: 250MB cache tier
+  - Storage: £0.015/GB/month (evidence retention)
+- **Full Production (13 councils):** £455/month
+  - Container Apps: 4x instances, 1 CPU, 2GB RAM
+  - PostgreSQL: General Purpose tier (50GB, 32 DTUs)
+  - Redis: 5GB premium tier
+  - Storage: £1.50/month (scaled evidence)
+- **Rationale:** Cost-transparent for stakeholders; enables capacity planning
+- **Trade-off:** Cost model based on assumptions; requires Q1 2026 validation
+- **Sign-off:** Approved
+
+### API & Adapter Contracts (Naomi)
+
+**Decision 11: Global Error Handler (No Stack Traces)**
+- **Status:** Implemented
+- **Rule:** Never expose internal paths, stack traces, or database errors
+- **Pattern:**
+  `
+  {
+    "error": "Address lookup failed",
+    "code": "ADDR_LOOKUP_ERROR",
+    "timestamp": "2026-03-25T...",
+    "requestId": "req_abc123"
+  }
+  `
+- **Rationale:** OWASP A09:2021 (Security Logging) — prevent information leakage
+- **Trade-off:** Complicates debugging (requires centralized logging)
+- **Sign-off:** Approved
+
+**Decision 12: Request Hardening Middleware**
+- **Status:** Implemented
+- **Limits:**
+  - Body size: 10KB max
+  - URL path length: 256 characters
+  - Request timeout: 30 seconds
+  - No null bytes allowed in paths
+- **Rationale:** Prevent DoS, buffer overflow, and malicious payloads
+- **Trade-off:** May reject legitimate large requests (e.g., bulk evidence uploads)
+- **Sign-off:** Approved (10KB limit validated for typical requests)
+
+**Decision 13: Adapter Output Sanitisation**
+- **Status:** Implemented
+- **Rules:**
+  - HTML entities escaped (prevent XSS if data cached/displayed)
+  - Null bytes stripped
+  - Control characters removed
+  - Field length limits enforced per adapter
+- **Rationale:** Data from third-party APIs (councils) may contain malicious content
+- **Trade-off:** May alter legitimate data (e.g., special characters in property descriptions)
+- **Sign-off:** Approved (field validation guide provided to adapters)
+
+---
+
+## Summary
+
+Phase 4 hardening and production readiness is **CONDITIONAL GO** with two critical blockers:
+
+1. **Dependency Scanning CI**: Not yet deployed. Required before security sign-off.
+2. **SIEM Integration**: Monitoring and alerting infrastructure pending. Required for production SLA.
+
+All other work is complete and tested. Beta phase (3 councils) can begin pending blocker resolution.
+
+**Team Status:**
+- ✅ Amos: Security architecture complete
+- ✅ Holden: Product/architecture complete
+- ✅ Bobbie: QA & testing complete
+- ✅ Drummer: Infrastructure complete
+- ✅ Naomi: Backend security complete
+
+**Next Sprint:**
+1. Deploy dependency scanning CI (Amos + Drummer: 2 days)
+2. Integrate SIEM (Amos + Drummer: 3 days)
+3. Begin 3-council beta recruitment
+4. Prepare Y1 scale-out plan

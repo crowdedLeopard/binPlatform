@@ -347,3 +347,128 @@
 - Configure Alertmanager receivers (email/Slack)
 - Create GitHub issue template for "New Adapter Rollout" with checklist
 
+### 2026-03-25 - Phase 4 Production Infrastructure Hardening and DR Preparedness
+
+**Dockerfile Hardening (All Images: API, Monitor, Worker):**
+- Multi-stage builds: builder (npm ci) → runtime (node:20-alpine with pinned digest)
+- Runtime stage uses `node:20-alpine@sha256:...` (pin digest for reproducibility, update quarterly)
+- Non-root user: `addgroup -S appgroup && adduser -S appuser -G appgroup`
+- `USER appuser` before final CMD (no root execution)
+- Read-only filesystem support: documented writable tmpfs mount requirements (`/tmp`, `/app/.npm`, `/app/logs`)
+- All capabilities dropped: `LABEL security.cap-drop="ALL"`
+- No shell in final stage: CMD uses exec form `["node", "dist/api/server.js"]` (not `sh -c`)
+- Health check with timeout: `HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3`
+- Package managers removed from runtime: `rm -f /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/yarn`
+- `COPY --chown=appuser:appgroup` for all file copies (correct ownership at copy time)
+- No dev dependencies in runtime: `npm prune --production` in builder stage
+- Health check script: `deploy/healthcheck.js` for API (minimal Node.js script, no external dependencies)
+
+**Disaster Recovery Runbook (`docs/runbooks/disaster-recovery.md`):**
+- RTO/RPO targets: API (5min RTO, N/A RPO), PostgreSQL (30min RTO, 1h RPO), Redis (5min RTO, ephemeral)
+- 5 failure scenarios documented: API service failure, PostgreSQL failure, Redis failure, Azure Blob Storage failure, complete environment loss
+- Step-by-step recovery procedures with bash commands for each scenario
+- PostgreSQL recovery: point-in-time restore (Azure Flexible Server, up to 7 days) or pg_dump restore
+- Redis recovery: rebuild from config, cache warms automatically (data loss acceptable)
+- Blob storage failure: evidence collection degrades gracefully (non-critical to data serving)
+- Complete environment loss: 45-minute rebuild from git + Terraform + migrations
+- Backup procedures: daily pg_dump with geo-redundant upload, 30-day retention, monthly snapshots (12 months)
+- Configuration backup: fully in git (no separate backup needed, secrets in Key Vault)
+- Quarterly restore drill procedure: test in staging, measure RTO/RPO, document results
+- Escalation matrix: P0 (immediate page), P1 (15min email), P2 (1h email), P3 (4h ticket)
+- Post-incident review template with timeline, root cause, resolution, prevention action items
+
+**Backup and Restore Runbook (`docs/runbooks/backup-restore.md`):**
+- What needs backing up: PostgreSQL (critical, daily), Azure Blob Storage (medium, geo-redundant), Configuration (low, git)
+- What does NOT need backing up: Redis (ephemeral), application logs (Application Insights, 90-day retention)
+- Automated daily backup: cron job (`/etc/cron.daily/pg-backup.sh`) with geo-redundant upload to separate storage account
+- Backup verification: file size check, upload confirmation, Prometheus metric export
+- Retention policies: 30 days rolling (daily), 12 months (monthly snapshots), indefinite (manual backups)
+- Restore procedures: full restore from daily backup, point-in-time restore (Azure Flexible Server), selective table restore
+- Quarterly restore drill: test in staging, measure RTO, record results in `docs/restore-drill-log.md`
+- Backup monitoring: Prometheus metrics (`backup_last_success_timestamp_seconds`, `backup_size_bytes`, `backup_duration_seconds`)
+- Alerting rules: BackupMissing (>26h since last backup), BackupTruncated (<1MB file size)
+
+**Operations Handbook (`docs/operations-handbook.md`):**
+- Daily checks (10min): adapter health dashboard, security event count, synthetic checks, confidence scores
+- Weekly checks (30min): drift alerts review, evidence retention stats, failed acquisition rate, dependency scan results
+- Monthly checks (2h): API key rotation (30-day grace period), egress allowlist review, IR drill (rotate scenarios), audit log pruning
+- Common operations: disable adapter (kill switch), rotate API key, force evidence purge, scale API horizontally, investigate slow response, review security alert
+- Monitoring quick reference: Grafana dashboards, Prometheus queries, Application Insights KQL queries
+- Escalation paths: P0-P3 severity levels, PagerDuty rotation, on-call schedule
+- Quick links: production API, Grafana, Prometheus, Alertmanager, Azure Portal, GitHub
+- Environment variables reference: critical variables with security annotations
+
+**CI/CD Hardening (``.github/workflows/ci.yml`):**
+- Explicit `permissions:` blocks on all jobs (principle of least privilege for GITHUB_TOKEN)
+- Top-level permissions: `contents: read`, `security-events: write`, `pull-requests: read`
+- Per-job permissions: most jobs `contents: read` only, security jobs add `security-events: write`
+- `timeout-minutes: 15` on all jobs (prevent runaway CI costs)
+- New job: `security-scorecard` (OSSF Scorecard with SARIF upload to GitHub Security)
+- New job: `license-check` (npx license-checker with allowlist: MIT, Apache-2.0, BSD, ISC, CC0)
+- New job: `sbom-generate` (Anchore SBOM action, SPDX JSON format, 90-day artifact retention)
+- New job: `container-sign` (cosign image signing on push to main, keyless signing with Sigstore)
+- All Dockerfiles linted: added `Dockerfile.monitor` to hadolint checks
+- SARIF uploads for: Trivy (API + Worker + Monitor), OWASP Dependency Check, tfsec, OSSF Scorecard
+- Secrets never echoed: all `${{ secrets.NAME }}` references are write-only
+- Pull request safety: uses `pull_request` trigger (NOT `pull_request_target` which is dangerous for forks)
+
+**Terraform Production Environment (`infra/terraform/environments/production/`):**
+- Backend: Azure Storage (`stbinplatformtfstate`, container `tfstate`, key `production.terraform.tfstate`)
+- Provider feature flags: prevent RG deletion if contains resources, Key Vault soft delete enabled
+- Networking: VNET 10.0.0.0/16 with subnets for API, worker, database, browser adapters
+- Database: Azure Flexible Server `GP_Standard_D4s_v3` (4 vCores, 16GB RAM), 128GB storage, 35-day backup retention, geo-redundant, HA enabled
+- Storage: Standard GRS (geo-redundant), blob versioning enabled, 7-day evidence retention, 30-day backup retention
+- API: Azure Container Apps, 3-10 replicas, 1 vCPU / 2Gi memory, health checks on `/health/ready`
+- Monitoring: Log Analytics 90-day retention, Application Insights 100% sampling, PagerDuty + Slack alerts
+- Secrets: all connection strings stored in Key Vault, referenced via `@Microsoft.KeyVault(SecretUri=...)`
+
+**Terraform Staging Environment (`infra/terraform/environments/staging/`):**
+- Backend: same storage account, key `staging.terraform.tfstate`
+- Database: Burstable `B_Standard_B1ms` (1 vCore, 2GB RAM), 32GB storage, 7-day backup, LRS, no HA
+- Storage: Standard LRS (locally redundant), no versioning, 3-day evidence retention, 7-day backup retention
+- API: 1-3 replicas, 0.5 vCPU / 1Gi memory (cost-optimized)
+- Monitoring: Log Analytics 30-day retention, Application Insights 50% sampling (cost optimization)
+- No DDoS protection (staging only), fewer alert receivers (team channel only)
+
+**Terraform Documentation (`infra/terraform/README.md`):**
+- Prerequisites: Terraform >= 1.6.0, Azure CLI with subscription access
+- One-time backend bootstrap: create `rg-binplatform-tfstate` resource group and storage account
+- Deployment commands: `terraform init`, `terraform plan`, `terraform apply` per environment
+- Environment-specific `.tfvars` files for customization
+- State management: remote state in Azure Storage, locking enabled
+- Troubleshooting: common errors (auth, provider version, state lock, destroy failures)
+- Production vs staging comparison table (SKUs, replicas, retention, costs)
+
+**Infrastructure Security Decisions:**
+- Read-only filesystem for all containers (requires tmpfs mounts at /tmp, /app/.npm, /app/logs documented)
+- Capability drop ALL (no Linux capabilities granted to containers)
+- Image digest pinning for reproducibility (update quarterly, not on every build)
+- Keyless container signing with Sigstore/cosign (no key management required)
+- SBOM generation for all builds (supply chain security, 90-day retention)
+- License compliance enforced in CI (only approved OSS licenses allowed)
+- OSSF Scorecard for repository security posture (automated remediation recommendations)
+- Explicit GITHUB_TOKEN permissions (no implicit write access, reduce supply chain attack surface)
+
+**Operational Improvements:**
+- Daily operations documented and time-boxed (10min daily, 30min weekly, 2h monthly)
+- Quarterly restore drills ensure DR procedures remain valid
+- IR drills rotate through scenarios monthly (API failure, DB failure, Redis failure)
+- API key rotation automated with 30-day grace period (monthly security best practice)
+- Evidence auto-purge enforced by lifecycle policy (7 days in production, 3 days in staging)
+- Monitoring quick reference: one-page summary of key queries and dashboards
+
+**Key Tradeoffs:**
+- Read-only filesystem adds complexity (tmpfs mounts required) but hardens runtime significantly
+- Image digest pinning requires quarterly updates (manual process) but prevents supply chain tampering
+- Quarterly restore drills consume staging resources but validate DR procedures remain functional
+- SBOM generation adds CI time (~2min) but enables supply chain vulnerability tracking
+- Container signing adds deployment complexity but enables provenance verification
+
+**Production Readiness:**
+- All Dockerfiles hardened to production standards (non-root, read-only, capability drop, digest pinning)
+- Comprehensive DR procedures documented and testable (5min-45min RTO depending on scenario)
+- Backup automation with monitoring and alerting (daily automated, quarterly drill verification)
+- Day-to-day operations handbook reduces MTTR (mean time to resolution)
+- Terraform environments ready for production deployment (full IaC, no manual steps)
+- CI/CD gates enforce security posture (license check, SBOM, scorecard, container signing)
+

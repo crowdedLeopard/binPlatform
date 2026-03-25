@@ -801,3 +801,109 @@ avigateToLookupPage() — Navigate with domain validation
 - Estimated 40% code reuse for next form-based council
 - Estimated 50% code reuse for next Granicus council
 
+
+---
+
+### 2026-03-26: Phase 4 — Adapter & API Hardening Complete
+
+**Delivered:** Comprehensive security hardening across adapters, API endpoints, and error responses.
+
+**1. Error Response Hardening (src/api/middleware/error-handler.ts):**
+- **Created:** Global error handler middleware for Hono and Fastify
+- **Security Guarantees:**
+  - Never leaks stack traces to clients (logged internally only)
+  - Never reveals internal file paths (sanitised to `[PATH]`)
+  - Never reveals database query details (sanitised to `[SQL_QUERY]`)
+  - Never reveals which specific validation failed for auth endpoints (generic "Unauthorized")
+  - Always returns consistent JSON shape: `{ error: { code, message, requestId } }`
+  - Logs full details internally with requestId for correlation
+- **Error Classification:**
+  - ApiError → Return as-is (already sanitised)
+  - ValidationError → 400 with field-level details (safe to expose)
+  - AuthError → 401 with only "Unauthorized" (no detail)
+  - DatabaseError → 500 with only "Internal error" + requestId (never expose DB details)
+  - TimeoutError → 504 with generic timeout message
+  - Unknown → 500 with sanitised message + requestId
+- **Dual Implementation:** Hono middleware + Fastify error handler for compatibility
+
+**2. API Request Hardening (src/api/middleware/request-hardening.ts):**
+- **Created:** Request hardening middleware applied to all routes
+- **Security Controls:**
+  - Request size limit: 10KB max
+  - Content-Type enforcement: only application/json for POST/PATCH/PUT
+  - Strict URL path validation: only alphanumeric, hyphens, underscores
+  - Path traversal rejection: blocks .., %2F, %5C
+  - Request ID injection: UUID v4 if not present
+  - Timeout enforcement: 30s hard limit per request
+  - User-Agent logging for abuse analysis
+  - HTTP method validation: 405 (not 404) for unexpected methods
+
+**3. Adapter Response Sanitisation (src/adapters/base/sanitise.ts):**
+- **Created:** Shared sanitisation module used by ALL adapters
+- **Operations:**
+  - Strip HTML tags (prevent XSS)
+  - Normalise whitespace
+  - Truncate overly-long strings (title: 200, notes: 500, address: 300)
+  - Validate date fields are valid ISO-8601
+  - Validate collection types in canonical enum
+  - Strip unknown fields from upstream
+  - Validate UPRN format, postcode format
+  - Sanitise metadata (only safe primitive values)
+- **Functions:** sanitiseCollectionEvent, sanitiseCollectionService, sanitiseAddressCandidate
+
+**4. Rate Limit Tuning (src/api/middleware/rateLimit.ts):**
+- **Enhanced:** Per-endpoint rate limits based on risk/cost
+- **Tiers:**
+  - PUBLIC_READ: 200/min per IP
+  - ADDRESS_RESOLUTION: 20/min per IP, 100/min per API key
+  - COLLECTION_DATA: 60/min per IP
+  - HEALTH_CHECK: 600/min
+  - ADMIN_READ: 30/min per API key
+  - ADMIN_WRITE: 10/min per API key
+- **Implementation:** Redis-backed, fail-open on Redis failure
+
+**5. Cache Poisoning Prevention (src/storage/cache/client.ts):**
+- **Enhanced:** Redis cache client with security controls
+- **Cache Key Schema (Namespaced):**
+  - Address: cache:{councilId}:address:{postcode}:{house}
+  - Events: cache:{councilId}:events:{propertyId}
+  - Services: cache:{councilId}:services:{propertyId}
+- **Prevention:**
+  - Namespaced keys prevent collision
+  - Key validation (max 200 chars, safe chars only)
+  - Path traversal rejection (..)
+  - Max cached value size (1MB)
+  - Optional validation callback on read
+  - Auto-delete corrupted values
+- **Functions:** buildCacheKey, sanitiseForCacheKey, invalidateCouncilCache, getCacheStats
+
+**6. Adapter Validator (src/adapters/base/adapter-validator.ts):**
+- **Created:** Formal output validator
+- **Rules:**
+  - Required fields present
+  - Confidence 0.0-1.0
+  - Dates valid ISO-8601, not in past, not >365 days future
+  - At least 1 event/service (warn if 0)
+  - Service types in canonical enum
+- **Behavior:** Validation failures add to warnings (do NOT throw)
+
+**7. Selector Validation Guide (docs/adapters/selector-validation-guide.md):**
+- **Created:** Guide for validating 11 browser-based adapters
+- **Contents:**
+  - Validation checklist (5 steps)
+  - Manual validation with DevTools
+  - Known fragile patterns
+  - Monitoring/drift detection
+  - Troubleshooting guide
+
+**Key Learnings:**
+- Defense in depth: error handler + request hardening + sanitisation + validation
+- Generic error messages prevent info leakage
+- Rate limiting must be tiered by endpoint cost
+- Cache keys must be namespaced and validated
+- Adapter output must be sanitised (XSS prevention)
+- Browser automation is fragile (quarterly validation needed)
+- Validation should warn, not throw (degraded result > no result)
+- Request ID critical for debugging (auto-injected, logged everywhere)
+
+---
