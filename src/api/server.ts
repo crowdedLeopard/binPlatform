@@ -34,7 +34,7 @@ try {
 // Runtime adapter state (in-memory)
 const disabledAdapters = new Map<string, { reason: string; disabled_at: string }>();
 const schemaSnapshots = new Map<string, { hash: string; captured_at: string }>();
-let lastDriftCheck: { checked_at: string; results: any[] } | null = null;
+let lastDriftCheck: { checked_at: string; total: number; ok: number; drifted: number; unreachable: number; results: any[] } | null = null;
 
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const HOST = process.env.HOST || '0.0.0.0';
