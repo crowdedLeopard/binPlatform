@@ -907,3 +907,133 @@ avigateToLookupPage() — Navigate with domain validation
 - Request ID critical for debugging (auto-injected, logged everywhere)
 
 ---
+
+### 2026-03-26: Core Collection API Routes Implemented
+
+**Delivered:** Three primary API routes for postcode and property lookups, wired to adapter registry.
+
+**Routes Implemented:**
+
+**1. GET /v1/postcodes/:postcode/addresses**
+- **Purpose:** Resolve UK postcode to address candidates
+- **Input Validation:**
+  - UK postcode format: AA9 9AA, A9 9AA, AA99 9AA, A9A 9AA, AA9A 9AA
+  - Normalized to uppercase with space (e.g., "so50 1qd" → "SO50 1QD")
+  - Returns 400 for invalid format
+- **Query Params:**
+  - `councilId` (required): Council to query (e.g., "eastleigh", "fareham")
+  - Council auto-detection not yet implemented (requires ONS postcode directory)
+- **Response Shape:**
+  ```json
+  {
+    "postcode": "SO50 1QD",
+    "council_id": "eastleigh",
+    "addresses": [
+      {
+        "id": "eastleigh:100060321174",
+        "uprn": "100060321174",
+        "address": "1 High Street, Eastleigh",
+        "council_id": "eastleigh"
+      }
+    ],
+    "source_method": "api",
+    "source_timestamp": "2026-03-26T10:00:00Z",
+    "confidence": 0.95
+  }
+  ```
+- **Error Handling:**
+  - 400: Invalid postcode format
+  - 503: Adapter unavailable or failed
+  - 500: Internal error
+
+**2. GET /v1/properties/:propertyId/collections**
+- **Purpose:** Get bin collection events for a property
+- **PropertyId Format:** `{councilId}:{localId}` (e.g., "eastleigh:100060321174")
+- **Query Params (Optional):**
+  - `from` (ISO 8601 date): Start date filter
+  - `to` (ISO 8601 date): End date filter
+- **Response Shape:**
+  ```json
+  {
+    "property_id": "eastleigh:100060321174",
+    "council_id": "eastleigh",
+    "collections": [
+      {
+        "date": "2026-03-28",
+        "bin_types": ["general_waste"],
+        "description": "Collection: general_waste",
+        "is_confirmed": true,
+        "is_rescheduled": false,
+        "notes": null
+      }
+    ],
+    "source_timestamp": "2026-03-26T10:00:00Z",
+    "confidence": 0.9,
+    "freshness": "live"
+  }
+  ```
+- **Error Handling:**
+  - 400: Invalid propertyId format (must be councilId:localId)
+  - 503: Adapter unavailable or failed
+  - 500: Internal error
+
+**3. GET /v1/properties/:propertyId/services**
+- **Purpose:** Get collection services available at property (bin types)
+- **PropertyId Format:** Same as collections route
+- **Response Shape:**
+  ```json
+  {
+    "property_id": "eastleigh:100060321174",
+    "council_id": "eastleigh",
+    "services": [
+      {
+        "service_id": "general-waste",
+        "service_type": "general_waste",
+        "name": "General Waste",
+        "frequency": "Weekly",
+        "container_type": "240L wheeled bin",
+        "container_colour": "Green",
+        "is_active": true,
+        "requires_subscription": false,
+        "notes": null
+      }
+    ],
+    "source_timestamp": "2026-03-26T10:00:00Z",
+    "confidence": 0.95
+  }
+  ```
+
+**Adapter Registry Integration:**
+- **Registry Location:** `src/adapters/registry.ts` (existing file)
+- **Initialized:** All 13 Hampshire adapters at module load
+- **Kill-Switch Support:**
+  - Environment variable: `ADAPTER_KILL_SWITCH_{COUNCIL_ID}`
+  - Example: `ADAPTER_KILL_SWITCH_EASTLEIGH=true` disables Eastleigh adapter
+  - Disabled adapters return 503 with clear error message
+- **Adapters Wired:**
+  - eastleigh (API-based, UPRN)
+  - fareham (Bartec SOAP)
+  - rushmoor (Browser automation)
+  - Plus 10 others (basingstoke-deane, gosport, havant, hart, portsmouth, test-valley, winchester, east-hampshire, new-forest, southampton)
+
+**Key Implementation Details:**
+- **PropertyId Contract:** `councilId:localId` enables cross-council lookups without collisions
+- **Adapter Errors → 503:** Council website failures return Service Unavailable, not 500
+- **Input Validation:** All postcodes normalized, propertyIds validated before adapter call
+- **Error Context:** Failure responses include `council_id` and `failure_category` for debugging
+- **UUID Correlation:** Each request gets `correlationId` for tracing through adapter layers
+- **No Try/Catch Swallowing:** Adapters can throw; routes catch and return appropriate HTTP codes
+
+**Future Enhancements:**
+- Postcode → Council mapping (ONS Postcode Directory or geographic boundaries)
+- UPRN resolution service for postcodes (needed for Eastleigh, Fareham)
+- Response caching (Redis-backed with council-specific TTLs)
+- Rate limiting per council (respect adapter rate limits)
+
+**Testing Notes:**
+- Build successful with no TypeScript errors
+- Routes added inline to `src/api/server.ts` after existing council routes
+- Adapter initialization happens at module load (before server start)
+- Removed redundant `src/api/routes/postcodes.ts` file (integrated directly)
+
+---

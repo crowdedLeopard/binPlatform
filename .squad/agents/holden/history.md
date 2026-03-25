@@ -430,3 +430,122 @@ Drummer's bootstrap defaulted to Fastify, but this decision moves to Hono as the
 - ✓ Pushed to master
 
 **Result:** Developers and demonstrators now have a dashboard-like entry point at GET / that shows platform health, council coverage, and API navigation.
+
+
+### 2026-03-25: New Forest, Test Valley, and Winchester Adapter Implementation Review
+
+**Task:** Review and validate three Hampshire council adapters (requested by crowdedLeopard).
+
+**Scope:** New Forest District Council, Test Valley Borough Council, Winchester City Council
+
+**Implementation Review:**
+
+**1. New Forest District Council (
+ew-forest)**
+- **Status:** POSTPONED (Correctly implemented as unavailable stub)
+- **Lookup Method:** UNSUPPORTED
+- **Rationale:** 403 Forbidden responses confirm aggressive bot protection (Incapsula/Imperva WAF)
+- **Decision:** Keep POSTPONED status until bot protection removed or formal API access granted
+- **Risk:** R02 (bot protection) + legal risk (UK Computer Misuse Act 1990)
+- **Adapter:** Returns appropriate FailureCategory.BOT_DETECTION errors
+- **Health Check:** Returns DEGRADED status with clear message
+- **Production Ready:** No (upstream blocks automated access)
+
+**2. Test Valley Borough Council (	est-valley)**
+- **Status:** IMPLEMENTED (NOT production-ready)
+- **Lookup Method:** BROWSER_AUTOMATION (HTML Form)
+- **Architecture:** Extends BrowserAdapter, uses FormAdapter helpers
+- **Selectors:** UNVALIDATED (manual verification required)
+- **Blocking Issue:** Website returned 404 on fetch attempt (cannot validate selectors remotely)
+- **Rate Limiting:** 8 RPM (appropriate for browser automation)
+- **Security Profile:** LOW risk (standard form-based)
+- **Supported Services:** General Waste, Recycling, Garden Waste
+- **Known Limitations:** No UPRN, alternate weekly pattern extraction incomplete
+- **Recommendation:** Deploy as BETA behind feature flag, prioritize manual QA validation with Playwright
+- **Test Postcodes:** SP6 1AA, SP10 1AA, SP11 1AA, SO20 1AA, SO51 1AA
+- **Next Steps:** Manual selector validation (Week 1), set SELECTORS_VALIDATED = true when confirmed
+
+**3. Winchester City Council (winchester)**
+- **Status:** IMPLEMENTED (NOT production-ready)
+- **Lookup Method:** BROWSER_AUTOMATION (React SPA)
+- **Architecture:** Extends BrowserAdapter, handles client-side JavaScript rendering
+- **Selectors:** UNVALIDATED (manual verification required)
+- **Blocking Issue:** Website returned 404 on fetch attempt (cannot validate selectors remotely)
+- **Rate Limiting:** 6 RPM (conservative for React SPA)
+- **Security Profile:** MEDIUM risk (browser automation, JavaScript execution)
+- **Supported Services:** General Waste, Recycling, Glass, Food Waste, Garden Waste (5 types)
+- **Performance:** 8-15s per request (browser overhead), 200-400MB memory
+- **API Discovery Opportunity:** React SPA likely calls backend API — XHR inspection recommended
+- **Recommendation:** Dual path: (1) Beta deployment with browser automation, (2) Investigate API endpoints
+- **Test Postcodes:** SO21 1AA, SO22 4NR, SO23 8UD, SO32 1AA
+- **Next Steps:** Manual selector validation + XHR endpoint discovery (Week 2-3)
+
+**Whitespace Platform Investigation:**
+- **Finding:** No Hampshire councils in current phase expose publicly-accessible Whitespace API endpoints
+- **Decision:** DO NOT implement shared WhitespaceAdapter base class at this time
+- **Rationale:** Test Valley uses postcode form (no Whitespace evidence), Winchester uses React SPA
+- **Alternative:** If APIs discovered via XHR inspection, implement per-council adapters using LookupMethod.HIDDEN_JSON
+
+**Build and Test Validation:**
+- ✅ TypeScript compilation: 0 errors
+- ✅ All three adapters compile cleanly
+- ✅ Implement CouncilAdapter interface correctly
+- ✅ Registered in egistry.ts (lines 116, 127, 128)
+- ✅ Kill switch logic functional
+- ✅ Evidence storage integration complete
+- ✅ BrowserAdapter base class provides security hardening
+
+**Infrastructure Utilized:**
+- BrowserAdapter base class (timeout enforcement, screenshot capture, domain validation)
+- FormAdapter shared helpers (navigation, postcode filling, cookie dismissal)
+- Evidence storage (screenshots, HTML source, HAR capture)
+- Network isolation (allowlist-only egress)
+- Kill switches (environment variables: ADAPTER_KILL_SWITCH_TEST_VALLEY, ADAPTER_KILL_SWITCH_WINCHESTER)
+
+**Recommendations:**
+
+*Immediate (Week 1):*
+1. Update READMEs for Test Valley and Winchester with "BETA - Selectors Unvalidated" warnings
+2. Deploy both adapters behind feature flags (kill switches enabled initially)
+3. Assign manual validation tasks to QA team with Playwright
+
+*Short-term (Month 1):*
+1. **Test Valley:** Validate selectors, test 5+ postcodes, extract alternate weekly pattern
+2. **Winchester:** Validate selectors, investigate XHR endpoints, test 4+ postcodes
+3. **New Forest:** Document postponement in docs/discovery/new-forest-postponed.md
+
+*Medium-term (Month 2-3):*
+1. API discovery initiative for Winchester and Test Valley (XHR inspection)
+2. If APIs found, migrate to LookupMethod.HIDDEN_JSON (faster, more reliable)
+3. Set up schema drift monitoring and alerts
+
+**Success Criteria:**
+- Test Valley: Selectors validated, 5+ postcodes tested, failure rate <10%, P95 <15s
+- Winchester: Selectors validated, 4+ postcodes tested, failure rate <15%, P95 <18s (browser) or <3s (API)
+- New Forest: Postponement documented, clear error messages, council contacted for API access (optional)
+
+**Risks Identified:**
+- **R01:** Selector drift (browser adapters break on website updates) — HIGH impact, MEDIUM probability
+- **R02:** Bot protection (New Forest blocks all access) — CRITICAL impact, CERTAIN probability
+- **R15:** Scraping abuse (IP blocks affect all adapters) — HIGH impact, LOW probability (rate limiting mitigates)
+- **R21:** Production deployment without validation (NEW) — HIGH impact, MEDIUM probability
+
+**Mitigation:**
+- Feature flags for controlled rollout
+- Conservative rate limits (6-8 RPM)
+- Schema drift detection via screenshot evidence
+- Monitoring and alerts for failure rates >15%
+
+**Documentation Created:**
+- .squad/decisions/inbox/holden-adapters-3.md (comprehensive implementation review, 16KB)
+- Documents current status, blocking issues, recommendations, success criteria
+
+**Outcome:**
+- ✅ Build passes (all adapters compile successfully)
+- ✅ Architecture validated (proper use of base classes, security hardening)
+- ⚠️ Production-readiness: PARTIAL (New Forest postponed correctly, Test Valley/Winchester implemented but selectors unvalidated)
+- 📋 Next steps clearly defined (manual validation, API discovery, monitoring setup)
+
+**Sign-off Status:**
+- **Holden (Lead Architect):** APPROVED for beta deployment with feature flags
+- **Awaiting:** Amos (security review), Drummer (ops deployment plan), QA team (manual validation)
