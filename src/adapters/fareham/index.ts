@@ -538,8 +538,13 @@ export class FarehamAdapter implements CouncilAdapter {
     const postcode = parts[0]; // "PO167DZ"
     const identifier = parts[1]; // "100060355983" or "0"
     
+    // Reconstruct UK postcode with space (e.g. "PO167DZ" → "PO16 7DZ")
+    const postcodeWithSpace = postcode.length > 3 
+      ? postcode.slice(0, -3) + ' ' + postcode.slice(-3)
+      : postcode;
+    
     // Re-query Fareham endpoint with postcode
-    const response = await this.fetchFarehamData(postcode, metadata);
+    const response = await this.fetchFarehamData(postcodeWithSpace, metadata);
     
     if (!response.success || !response.data) {
       return this.failureResult(
@@ -588,7 +593,7 @@ export class FarehamAdapter implements CouncilAdapter {
     return this.failureResult(
       metadata,
       FailureCategory.NOT_FOUND,
-      `Address not found for identifier ${identifier} in postcode ${postcode}`
+      `Address not found for identifier ${identifier} in postcode ${postcodeWithSpace}`
     );
   }
   
