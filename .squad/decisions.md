@@ -2350,6 +2350,70 @@ Before deploying to production:
   - Hardened security: Public access disabled, firewall rules cleaned, secrets in Key Vault
 - **Rationale:** Enable database and cache connectivity for API service
 - **Challenge Resolved:** Partition table trigger dependency — patched migration query to exclude partition children (NOT t.relispartition)
+
+---
+
+## Phase 5 Decisions (Deployment Complete)
+
+### TypeScript Error Resolution (Alex)
+
+**Decision: Fix All TypeScript Errors Before Production**
+- **Status:** ✅ Implemented (2026-03-25)
+- **Decision:** Fix 85+ TypeScript compilation errors across 40+ files by addressing root causes rather than using suppressions
+- **Key Principles:**
+  1. Pino v9 logger: Object-first pattern `logger.info({ data }, 'message')`
+  2. Redis/IoRedis: Use `ioredis` types exclusively (not `redis` package)
+  3. Method naming: Use lowercase ioredis method names (`zadd`, `zcard`, `zremrangebyscore`)
+  4. Interface compliance: All adapter implementations must fully match base interfaces
+  5. Type safety: Use proper type guards for error properties, enum values for comparisons
+  6. Azure Storage: Use correct SDK v12 types (undefined not 'private', explicit Buffer casting)
+  7. No suppressions: Avoid `@ts-ignore` and `@ts-expect-error` (except Hono library limitation workaround)
+- **Implementation:**
+  - Fixed 85+ logger calls across codebase
+  - Updated Redis type imports in 7 adapter implementations
+  - Added missing interface fields (AdapterHealth.councilId, AdapterSecurityProfile all 10 fields)
+  - Hardened error handling with type guards in server.ts
+  - Removed `"noEmitOnError": false` hack after verification
+- **Files Changed:** 40+ (adapters, middleware, routes, storage, workers, config)
+- **Build Result:** ✅ Clean build, 0 TypeScript errors
+- **Impact:** Unblocks production deployment, improves refactoring safety
+- **Commit:** 7c2bc91
+
+### ESM/CommonJS Resolution (Coordinator)
+
+**Decision: Convert require(ioredis) to ESM Import**
+- **Status:** ✅ Implemented (2026-03-25)
+- **Decision:** Fix CommonJS `require(ioredis)` incompatibility with ESM project configuration
+- **Implementation:**
+  - Changed server.ts from `const Redis = require('ioredis')` to `import Redis from 'ioredis'`
+  - Verified ESM export in package.json module field
+  - Tested Docker entrypoint with ESM loader
+- **Impact:** Enables production deployment on Azure Container Apps
+- **Commit:** 9a0c98f
+
+### Staging Deployment Readiness (Drummer)
+
+**Decision: Deploy Revision 0000007 to Staging**
+- **Status:** ✅ Implemented (2026-03-25)
+- **Decision:** Build container image with clean TypeScript and ESM fixes, push to ACR, deploy to ca-binplatform-api-staging
+- **Implementation:**
+  - Built image `dbf` from clean codebase
+  - Pushed to Azure Container Registry
+  - Deployed as revision 0000007 to ca-binplatform-api-staging
+  - Verified all endpoint health (200 OK)
+  - Connected DATABASE_URL and REDIS_URL
+  - Activated beta switch for 3 councils (Eastleigh, Fareham, Rushmoor)
+- **Health Status:** ✅ All replicas healthy
+- **API URL:** https://ca-binplatform-api-staging.icyriver-42deda52.uksouth.azurecontainerapps.io
+- **Endpoints Verified:**
+  - GET /health → 200 OK
+  - GET /ready → 200 OK
+  - GET /v1/councils → 200 OK (13 councils)
+- **Schema:** 94-table migration verified
+- **Impact:** API ready for beta validation phase
+- **Related Logs:** `.squad/orchestration-log/2026-03-25T17-final-deployment.md`
+
+---
 - **Outcome:** ✅ Database connected, Redis configured, 94 tables created, health endpoint responding
 - **Known Issue Flagged:** Application code: ReferenceError: require is not defined (ESM vs CommonJS) — requires dev team investigation
 - **Testing:** Health endpoint (HTTP 200), councils endpoint (HTTP 200), database connectivity verified
