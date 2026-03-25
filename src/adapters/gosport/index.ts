@@ -125,14 +125,20 @@ export class GosportAdapter implements CouncilAdapter {
   async getCollectionServices(input: PropertyIdentity): Promise<CollectionServiceResult> {
     const metadata = this.createMetadata();
     
-    const postcode = input.postcode;
-    if (!postcode) {
+    // localPropertyId is the postcode without spaces (e.g., "PO121BT")
+    // Reconstruct the postcode with space before last 3 characters
+    const localId = input.councilLocalId;
+    if (!localId) {
       return this.failureResult(
         metadata,
         FailureCategory.VALIDATION_ERROR,
-        'Postcode is required for Gosport lookups'
+        'Property ID is required for Gosport lookups'
       );
     }
+    
+    const postcode = localId.length > 3
+      ? localId.slice(0, -3) + ' ' + localId.slice(-3)
+      : localId;
     
     try {
       const response = await this.fetchSupatrakData(postcode, metadata);
@@ -171,14 +177,20 @@ export class GosportAdapter implements CouncilAdapter {
   ): Promise<CollectionEventResult> {
     const metadata = this.createMetadata();
     
-    const postcode = input.postcode;
-    if (!postcode) {
+    // localPropertyId is the postcode without spaces (e.g., "PO121BT")
+    // Reconstruct the postcode with space before last 3 characters
+    const localId = input.councilLocalId;
+    if (!localId) {
       return this.failureResult(
         metadata,
         FailureCategory.VALIDATION_ERROR,
-        'Postcode is required for Gosport lookups'
+        'Property ID is required for Gosport lookups'
       );
     }
+    
+    const postcode = localId.length > 3
+      ? localId.slice(0, -3) + ' ' + localId.slice(-3)
+      : localId;
     
     try {
       const response = await this.fetchSupatrakData(postcode, metadata);

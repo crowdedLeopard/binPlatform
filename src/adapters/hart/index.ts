@@ -77,13 +77,23 @@ export class HartAdapter implements CouncilAdapter {
   async resolveAddresses(input: PropertyLookupInput): Promise<AddressCandidateResult> {
     const metadata = this.createMetadata();
     
-    // Hart requires UPRN, not postcode lookup
+    // Hart's API is UPRN-based only - no postcode→address lookup available
+    // Return graceful failure to let server fall back to central UPRN service
     if (!input.uprn) {
-      return this.failureResult(
-        metadata,
-        FailureCategory.NOT_FOUND,
-        'Hart adapter requires UPRN. Use external UPRN resolution service first.'
-      );
+      metadata.completedAt = new Date().toISOString();
+      metadata.durationMs = Date.now() - new Date(metadata.startedAt).getTime();
+      
+      return {
+        success: false,
+        data: [],
+        acquisitionMetadata: metadata,
+        confidence: 0,
+        warnings: ['Hart API requires UPRN — postcode-only lookups not supported by council'],
+        securityWarnings: [],
+        failureCategory: FailureCategory.NOT_FOUND,
+        errorMessage: 'Hart adapter requires UPRN. Use external UPRN resolution service.',
+        fromCache: false,
+      };
     }
     
     const validation = validateUprn(input.uprn);

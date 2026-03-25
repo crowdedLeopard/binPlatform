@@ -1386,3 +1386,44 @@ pm run build — zero errors
 2. GET /v1/properties/fareham:PO167DZ:100060355983/collections → Should now return REAL collection dates
 
 The collections flow should work end-to-end. Property IDs now include postcode context, enabling the adapter to re-query the Fareham API and return actual collection schedules.
+
+---
+
+## Fix: Fareham Postcode Space Issue (2026-03-25 19:39)
+
+**Issue:**
+- Property ID: fareham:PO167DZ:100060355983
+- Postcode stored in councilLocalId without space: "PO167DZ"
+- Fareham API requires space before last 3 chars: "PO16 7DZ"
+- Error: "Address not found for identifier 100060355983 in postcode PO167DZ"
+
+**Root Cause:**
+In fetchFarehamDataByAddress, the postcode was extracted from councilLocalId (format: "PO167DZ:100060355983") and passed directly to the Fareham API without reconstructing the space.
+
+**Solution Applied:**
+Modified src/adapters/fareham/index.ts in fetchFarehamDataByAddress method:
+- Added postcode formatting logic before API call
+- Inserts space before last 3 characters: postcode.slice(0, -3) + ' ' + postcode.slice(-3)
+- Example: "PO167DZ" → "PO16 7DZ"
+- Also updated error message to show formatted postcode
+
+**Files Changed:**
+- src/adapters/fareham/index.ts (lines 541-547, 596)
+
+**Build Result:**
+- ✓ npm run build — zero errors
+- ✓ TypeScript compilation successful
+
+**Git Commit:**
+- Commit: cf60567
+- Message: "fix: restore postcode space in Fareham getCollectionEvents"
+- Pushed to master
+
+**Expected Result:**
+GET /v1/properties/fareham:PO167DZ:100060355983/collections should now successfully:
+1. Extract postcode "PO167DZ" from property ID
+2. Reconstruct as "PO16 7DZ" with space
+3. Query Fareham API with correctly formatted postcode
+4. Find the address by UPRN and return collection events
+
+The postcode formatting fix ensures the API query uses the correct format expected by Fareham's endpoint.
