@@ -7,6 +7,12 @@ import { logger } from '../observability/logger.js';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import { getAdapter, isCouncilSupported, initializeAdapters } from '../adapters/registry.js';
+import type { PropertyLookupInput, PropertyIdentity, DateRange } from '../adapters/base/adapter.interface.js';
+import { v4 as uuidv4 } from 'uuid';
+
+// Initialize adapters at module load
+initializeAdapters();
 
 // Load council registry at startup
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -15,6 +21,18 @@ try {
   const raw = JSON.parse(readFileSync(join(__dirname, '../../data/council-registry.json'), 'utf8'));
   councilRegistry = Array.isArray(raw) ? raw : (raw.councils ?? Object.values(raw));
 } catch { /* registry unavailable */ }
+
+// Load test postcodes
+let testPostcodes: Record<string, string> = {};
+try {
+  const testData = JSON.parse(readFileSync(join(__dirname, '../../data/test-postcodes.json'), 'utf8'));
+  testPostcodes = testData.postcodes || {};
+} catch { /* test postcodes unavailable */ }
+
+// Runtime adapter state (in-memory)
+const disabledAdapters = new Map<string, { reason: string; disabled_at: string }>();
+const schemaSnapshots = new Map<string, { hash: string; captured_at: string }>();
+let lastDriftCheck: { checked_at: string; results: any[] } | null = null;
 
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const HOST = process.env.HOST || '0.0.0.0';
@@ -82,7 +100,7 @@ export async function buildServer() {
     origin: NODE_ENV === 'production' ? corsOrigins : true,
     credentials: process.env.CORS_CREDENTIALS === 'true',
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-API-Key'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-API-Key', 'X-Admin-Key'],
     exposedHeaders: ['X-Request-ID'],
     maxAge: 86400 // 24 hours
   });
@@ -474,6 +492,260 @@ export async function buildServer() {
       upstream_risk_level: council.upstream_risk_level,
       checked_at: new Date().toISOString()
     };
+  });
+
+  // =============================================================================
+  // POSTCODE & PROPERTY ROUTES
+  // =============================================================================
+
+  /**
+   * GET /v1/postcodes/:postcode/addresses
+   * Resolve postcode to address candidates
+   */
+  server.get('/v1/postcodes/:postcode/addresses', async (request: any, reply: any) => {
+    const { postcode } = request.params;
+    const { councilId } = request.query;
+
+    // Validate UK postcode format
+    const cleaned = postcode.trim().toUpperCase().replace(/\s+/g, ' ');
+    const ukPostcodeRegex = /^([A-Z]{1,2}\d{1,2}[A-Z]?)\s?(\d[A-Z]{2})$/;
+    
+    if (!ukPostcodeRegex.test(cleaned)) {
+      return reply.code(400).send({
+        statusCode: 400,
+        error: 'Bad Request',
+        message: 'Invalid UK postcode format',
+      });
+    }
+
+    const normalizedPostcode = cleaned;
+
+    try {
+      // If councilId specified, use that adapter
+      if (councilId) {
+        if (!isCouncilSupported(councilId)) {
+          return reply.code(503).send({
+            statusCode: 503,
+            error: 'Service Unavailable',
+            message: `Council '${councilId}' adapter not available`,
+            council_id: councilId,
+          });
+        }
+
+        const adapter = getAdapter(councilId);
+        const input: PropertyLookupInput = {
+          postcode: normalizedPostcode,
+          correlationId: uuidv4(),
+        };
+
+        const result = await adapter.resolveAddresses(input);
+
+        if (!result.success) {
+          return reply.code(503).send({
+            statusCode: 503,
+            error: 'Service Unavailable',
+            message: result.errorMessage || 'Failed to fetch addresses',
+            council_id: councilId,
+            failure_category: result.failureCategory,
+          });
+        }
+
+        return {
+          postcode: normalizedPostcode,
+          council_id: councilId,
+          addresses: result.data?.map(addr => ({
+            id: `${councilId}:${addr.councilLocalId}`,
+            uprn: addr.uprn,
+            address: addr.addressDisplay,
+            council_id: councilId,
+          })) || [],
+          source_method: 'api',
+          source_timestamp: new Date().toISOString(),
+          confidence: result.confidence,
+        };
+      }
+
+      // No councilId — require it for now
+      return reply.code(400).send({
+        statusCode: 400,
+        error: 'Bad Request',
+        message: 'councilId query parameter required',
+        hint: 'Specify ?councilId=<council-id> to query a specific council',
+      });
+    } catch (error) {
+      request.log.error({ err: error, postcode: normalizedPostcode, councilId }, 'Address lookup error');
+      return reply.code(500).send({
+        statusCode: 500,
+        error: 'Internal Server Error',
+        message: 'Failed to lookup addresses',
+      });
+    }
+  });
+
+  /**
+   * GET /v1/properties/:propertyId/collections
+   * Get collection events (scheduled pickups) for a property
+   */
+  server.get('/v1/properties/:propertyId/collections', async (request: any, reply: any) => {
+    const { propertyId } = request.params;
+    const { from, to } = request.query;
+
+    // Parse propertyId format: councilId:localId
+    const parts = propertyId.split(':');
+    if (parts.length !== 2) {
+      return reply.code(400).send({
+        statusCode: 400,
+        error: 'Bad Request',
+        message: 'Invalid propertyId format. Expected: councilId:localId',
+      });
+    }
+
+    const [councilId, localId] = parts;
+
+    // Check if council supported
+    if (!isCouncilSupported(councilId)) {
+      return reply.code(503).send({
+        statusCode: 503,
+        error: 'Service Unavailable',
+        message: `Council '${councilId}' adapter not available`,
+        council_id: councilId,
+      });
+    }
+
+    try {
+      const adapter = getAdapter(councilId);
+
+      const identity: PropertyIdentity = {
+        councilLocalId: localId,
+        address: '',
+        postcode: '',
+        correlationId: uuidv4(),
+      };
+
+      let range: DateRange | undefined;
+      if (from && to) {
+        range = { from, to };
+      }
+
+      const result = await adapter.getCollectionEvents(identity, range);
+
+      if (!result.success) {
+        return reply.code(503).send({
+          statusCode: 503,
+          error: 'Service Unavailable',
+          message: result.errorMessage || 'Failed to fetch collection events',
+          council_id: councilId,
+          failure_category: result.failureCategory,
+        });
+      }
+
+      // Transform to API response
+      const collections = result.data?.map(event => ({
+        date: event.collectionDate,
+        bin_types: [event.serviceType],
+        description: `Collection: ${event.serviceType}`,
+        is_confirmed: event.isConfirmed,
+        is_rescheduled: event.isRescheduled,
+        notes: event.notes,
+      })) || [];
+
+      return {
+        property_id: propertyId,
+        council_id: councilId,
+        collections,
+        source_timestamp: new Date().toISOString(),
+        confidence: result.confidence,
+        freshness: 'live',
+      };
+    } catch (error) {
+      request.log.error({ err: error, propertyId }, 'Collection events error');
+      return reply.code(500).send({
+        statusCode: 500,
+        error: 'Internal Server Error',
+        message: 'Failed to fetch collection events',
+      });
+    }
+  });
+
+  /**
+   * GET /v1/properties/:propertyId/services
+   * Get collection services available at a property
+   */
+  server.get('/v1/properties/:propertyId/services', async (request: any, reply: any) => {
+    const { propertyId } = request.params;
+
+    // Parse propertyId format: councilId:localId
+    const parts = propertyId.split(':');
+    if (parts.length !== 2) {
+      return reply.code(400).send({
+        statusCode: 400,
+        error: 'Bad Request',
+        message: 'Invalid propertyId format. Expected: councilId:localId',
+      });
+    }
+
+    const [councilId, localId] = parts;
+
+    // Check if council supported
+    if (!isCouncilSupported(councilId)) {
+      return reply.code(503).send({
+        statusCode: 503,
+        error: 'Service Unavailable',
+        message: `Council '${councilId}' adapter not available`,
+        council_id: councilId,
+      });
+    }
+
+    try {
+      const adapter = getAdapter(councilId);
+
+      const identity: PropertyIdentity = {
+        councilLocalId: localId,
+        address: '',
+        postcode: '',
+        correlationId: uuidv4(),
+      };
+
+      const result = await adapter.getCollectionServices(identity);
+
+      if (!result.success) {
+        return reply.code(503).send({
+          statusCode: 503,
+          error: 'Service Unavailable',
+          message: result.errorMessage || 'Failed to fetch collection services',
+          council_id: councilId,
+          failure_category: result.failureCategory,
+        });
+      }
+
+      // Transform to API response
+      const services = result.data?.map(service => ({
+        service_id: service.serviceId,
+        service_type: service.serviceType,
+        name: service.serviceNameDisplay,
+        frequency: service.frequency,
+        container_type: service.containerType,
+        container_colour: service.containerColour,
+        is_active: service.isActive,
+        requires_subscription: service.requiresSubscription,
+        notes: service.notes,
+      })) || [];
+
+      return {
+        property_id: propertyId,
+        council_id: councilId,
+        services,
+        source_timestamp: new Date().toISOString(),
+        confidence: result.confidence,
+      };
+    } catch (error) {
+      request.log.error({ err: error, propertyId }, 'Collection services error');
+      return reply.code(500).send({
+        statusCode: 500,
+        error: 'Internal Server Error',
+        message: 'Failed to fetch collection services',
+      });
+    }
   });
 
   // Global error handler - sanitize errors in production

@@ -646,3 +646,134 @@ Delivered complete Phase 3 data retention enforcement and incident management in
 - ⬜ Cron scheduler integration (Holden/Drummer)
 - ⬜ Monitoring alerts (Drummer)
 - ⬜ Testing in staging environment (All)
+
+---
+
+## 2026-03-26 — Security Review: Havant, Gosport, and East Hampshire Adapters
+
+**Task:** Security audit and validation of three council adapters
+
+**Findings:**
+
+1. **Adapters Already Implemented:**
+   - All three adapters (Havant, Gosport, East Hampshire) were already implemented
+   - Located at src/adapters/{havant,gosport,east-hampshire}/index.ts
+   - Build succeeded with no TypeScript errors
+
+2. **Security Issues Identified and Fixed:**
+   
+   **CRITICAL — Kill Switch Naming Bug:**
+   - ❌ Havant adapter checked ADAPTER_KILL_SWITCH_HAVANT_DEANE (incorrect)
+   - ❌ Gosport adapter checked ADAPTER_KILL_SWITCH_GOSPORT_DEANE (incorrect)
+   - ✅ Fixed to ADAPTER_KILL_SWITCH_HAVANT and ADAPTER_KILL_SWITCH_GOSPORT
+   - **Impact:** Emergency kill switches would not have worked correctly
+   - **Committed:** 5dea4f2 — "fix: correct kill switch environment variable names"
+
+3. **Security Controls Verified — All PASS:**
+
+   ✅ **Input Validation:**
+   - Postcode validation with regex: /^[A-Z]{1,2}\d{1,2}[A-Z]?\s?\d[A-Z]{2}/
+   - UPRN validation (East Hampshire)
+   - Prevents injection attacks via malformed input
+
+   ✅ **Output Sanitization:**
+   - All adapters use base sanitise.ts module
+   - HTML stripping via stripHtml()
+   - XSS prevention in all returned fields
+   - Max length enforcement on all string fields
+
+   ✅ **Timeout Enforcement:**
+   - Browser adapters: 30s navigation + 15s script timeout
+   - PDF adapter: 30s download timeout with AbortController
+   - Prevents hung requests and resource exhaustion
+
+   ✅ **Domain Allowlisting:**
+   - Havant: ['havant.gov.uk']
+   - Gosport: ['gosport.gov.uk']
+   - East Hampshire: ['easthants.gov.uk', 'www.easthants.gov.uk']
+   - Prevents SSRF to arbitrary domains
+
+   ✅ **Browser Automation Security (Havant, Gosport):**
+   - Sandboxed execution via BrowserAdapter base class
+   - Headless mode enabled
+   - Screenshot capture for audit trail
+   - Network isolation enforced
+   - JavaScript execution restricted to council domains
+
+   ✅ **PDF Security (East Hampshire):**
+   - Max PDF size: 5MB (prevents zip bombs)
+   - Content-type validation before parsing
+   - Uses pdf-parse library (no code execution)
+   - SHA-256 hash stored for integrity verification
+
+   ✅ **Error Handling:**
+   - All external calls wrapped in try/catch
+   - Graceful degradation on upstream failures
+   - Detailed error categorization (FailureCategory enum)
+   - No sensitive data in error messages
+
+4. **Known Limitations — NOT Security Issues:**
+
+   ⚠️ **Selectors Not Validated:**
+   - Havant: SELECTORS_VALIDATED = false
+   - Gosport: SELECTORS_VALIDATED = false
+   - **Impact:** Adapters marked as DEGRADED health status
+   - **Risk:** Functional issue, not security — parsing may fail but safely
+   - **Mitigation:** Adapters still pass security profile, just need live site validation
+
+   ⚠️ **Browser Automation Attack Surface:**
+   - Havant and Gosport require Playwright (larger attack surface than API)
+   - **Risk:** Medium — JavaScript execution from council domains
+   - **Mitigation:** Sandboxing, domain allowlisting, timeout enforcement all in place
+   - **Recommendation:** Consider migrating to API-based approach if council exposes one
+
+5. **Security Recommendations:**
+
+   **For Naomi (Integration Lead):**
+   - Monitor adapter health metrics for bot detection (403/429 responses)
+   - Set up alerting for ADAPTER_KILL_SWITCH_HAVANT and ADAPTER_KILL_SWITCH_GOSPORT activation
+   - Test kill switches work correctly in staging
+
+   **For Drummer (Infrastructure):**
+   - Ensure ADAPTER_KILL_SWITCH_HAVANT and ADAPTER_KILL_SWITCH_GOSPORT are configurable without deployment
+   - Rate limit adapter calls: max 10 req/min per adapter (as per capabilities)
+   - Monitor for schema drift detection
+
+   **For Holden (Backend):**
+   - Validate selector patterns against live sites before marking SELECTORS_VALIDATED = true
+   - Consider implementing retry logic with exponential backoff for bot detection
+   - Add integration tests for adapter security controls
+
+**Production Readiness:**
+
+| Adapter       | Security | Functional | Production Ready? |
+|---------------|----------|------------|-------------------|
+| Havant        | ✅ PASS  | ⚠️ Degraded| ⬜ Pending validation |
+| Gosport       | ✅ PASS  | ⚠️ Degraded| ⬜ Pending validation |
+| East Hampshire| ✅ PASS  | ✅ Ready   | ✅ Yes (with PDF caveat) |
+
+**Security Posture: APPROVED**
+
+All three adapters implement defense-in-depth security controls:
+- Input validation (prevents injection)
+- Output sanitization (prevents XSS)
+- Timeout enforcement (prevents DoS)
+- Domain allowlisting (prevents SSRF)
+- Sandboxing and network isolation
+- Kill switches functional (post-fix)
+- Comprehensive error handling
+- Audit logging via evidence storage
+
+**Next Steps:**
+1. ✅ Kill switch bug fixed and committed
+2. ⬜ Validate browser selectors against live Havant and Gosport sites
+3. ⬜ Set SELECTORS_VALIDATED = true once validated
+4. ⬜ Deploy to staging and test with live council endpoints
+5. ⬜ Monitor for bot detection and rate limiting
+6. ⬜ Promote to production once functional validation complete
+
+**Audit Trail:**
+- Security review: 2026-03-26
+- Reviewed by: Amos (Security Engineer)
+- Commit: 5dea4f2 — Kill switch naming fix
+- Status: **SECURITY APPROVED** (functional validation pending)
