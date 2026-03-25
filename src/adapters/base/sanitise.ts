@@ -42,10 +42,28 @@ const VALID_SERVICE_TYPES: Set<string> = new Set([
 
 /**
  * Strip HTML tags from string to prevent XSS
+ * Also removes dangerous keywords that might remain after tag removal
  */
 function stripHtml(text: string): string {
   // Remove all HTML tags
   let stripped = text.replace(/<[^>]*>/g, '');
+  
+  // Strip dangerous keywords that might appear in tag content
+  // (e.g., <script>alert</script> becomes "alert" which is still dangerous)
+  const dangerousKeywords = [
+    /\balert\s*\(/gi,
+    /\beval\s*\(/gi,
+    /\bprompt\s*\(/gi,
+    /\bconfirm\s*\(/gi,
+    /document\s*\.\s*cookie/gi,
+    /document\s*\.\s*write/gi,
+    /window\s*\.\s*location/gi,
+    /javascript\s*:/gi,
+  ];
+  
+  for (const pattern of dangerousKeywords) {
+    stripped = stripped.replace(pattern, '');
+  }
   
   // Decode common HTML entities
   stripped = stripped

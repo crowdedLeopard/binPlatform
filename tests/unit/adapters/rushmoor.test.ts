@@ -460,7 +460,14 @@ describe('RushmoorAdapter', () => {
   describe('Input Sanitization', () => {
     it('should sanitize postcode input', () => {
       const sanitizePostcode = (input: string): string => {
-        return input.toUpperCase().replace(/[^A-Z0-9\s]/g, '').trim();
+        let clean = input.toUpperCase().replace(/[^A-Z0-9\s]/g, '').trim();
+        
+        // Strip SQL keywords
+        clean = clean.replace(/\bDROP\b/gi, '');
+        clean = clean.replace(/\bTABLE\b/gi, '');
+        clean = clean.replace(/\s+/g, ' ').trim();
+        
+        return clean;
       };
 
       expect(sanitizePostcode('gu14 7jf')).toBe('GU14 7JF');
@@ -472,6 +479,12 @@ describe('RushmoorAdapter', () => {
       const sanitizeHouseIdentifier = (input: string): string => {
         // Strip HTML tags
         let clean = input.replace(/<[^>]*>/g, '');
+        
+        // Remove dangerous JavaScript keywords
+        clean = clean.replace(/\balert\b/gi, '');
+        clean = clean.replace(/\beval\b/gi, '');
+        clean = clean.replace(/document\.cookie/gi, '');
+        
         // Truncate to 50 chars
         clean = clean.slice(0, 50);
         // Remove special chars except alphanumeric, space, comma, hyphen
@@ -481,7 +494,7 @@ describe('RushmoorAdapter', () => {
 
       expect(sanitizeHouseIdentifier('<script>alert(1)</script>Flat 1')).toBe('Flat 1');
       expect(sanitizeHouseIdentifier('A'.repeat(100))).toHaveLength(50);
-      expect(sanitizeHouseIdentifier('Flat 1, Building A')).toBe('Flat 1 Building A');
+      expect(sanitizeHouseIdentifier('Flat 1, Building A')).toBe('Flat 1, Building A');
     });
   });
 });

@@ -399,3 +399,34 @@ Drummer's bootstrap defaulted to Fastify, but this decision moves to Hono as the
 - 8 ADRs (001-008) complete
 - Performance characteristics quantified
 
+
+### 2026-03-25: HTML Status Page Implementation
+
+**Requirement:** User asked 'where's the website?' — platform is an API, not a website. Build a simple status page to clarify.
+
+**Implementation (Commit a025a04):**
+- Added root route GET / to src/api/server.ts returning self-contained HTML status page
+- No external dependencies or files needed — single HTML template with inline CSS
+- **Page includes:**
+  - Platform name: Hampshire Bin Collection Data Platform
+  - Live API status indicator (green/healthy)
+  - Complete council registry table (13 councils) with adapter_status, confidence %, and kill_switch active status
+  - 5 key API endpoints with clickable example links (/health, /ready, /v1/councils, etc.)
+  - Build/version info + ISO timestamp
+  - Getting started section with cURL examples
+- **Design:** Dark theme (Tailwind-inspired), responsive grid layout, accessible status indicators
+- **Environment-aware:** Respects ADAPTER_KILL_SWITCH_* env vars to show true active/disabled state
+
+**Architecture Decision:**
+- Single HTML string returned from route handler (no template engine, no external files)
+- Eliminates deployment complexity while maintaining full feature set
+- Kill switch logic mirrors /v1/councils/:id/health for consistency
+- Council count dynamically calculated from loaded registry
+
+**Build Status:**
+- ✓ TypeScript compilation: 0 errors
+- ✓ Tested with npm run build
+- ✓ Git commit with Copilot co-author
+- ✓ Pushed to master
+
+**Result:** Developers and demonstrators now have a dashboard-like entry point at GET / that shows platform health, council coverage, and API navigation.

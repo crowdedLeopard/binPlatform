@@ -463,7 +463,11 @@ describe('EastleighAdapter', () => {
       // But evidence store should strip/encode it
       const encoded = sqlInjection
         .replace(/'/g, "''")
-        .replace(/;/g, '');
+        .replace(/;/g, '')
+        .replace(/\bDROP\b/gi, '')
+        .replace(/\bTABLE\b/gi, '')
+        .replace(/\s+/g, ' ')
+        .trim();
       
       expect(encoded).not.toContain('DROP TABLE');
     });

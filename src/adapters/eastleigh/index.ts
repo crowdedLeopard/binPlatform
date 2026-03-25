@@ -37,6 +37,7 @@ import {
   sanitiseString,
 } from './parser.js';
 import { v4 as uuidv4 } from 'uuid';
+import { storeEvidence } from '../../storage/evidence/store-evidence.js';
 
 const ADAPTER_VERSION = '1.0.0';
 const EASTLEIGH_ENDPOINT = 'https://my.eastleigh.gov.uk/apex/EBC_Waste_Calendar';
@@ -365,18 +366,29 @@ export class EastleighAdapter implements CouncilAdapter {
       
       // Parse response
       const contentType = response.headers.get('content-type') || '';
+      
+      // CRITICAL: Get raw response text FIRST before parsing
+      // This ensures evidence storage has the original unmodified bytes
+      const rawResponseText = await response.text();
       let data: EastleighRawResponse;
       
       if (contentType.includes('application/json')) {
-        data = await response.json() as EastleighRawResponse;
+        try {
+          data = JSON.parse(rawResponseText) as EastleighRawResponse;
+        } catch {
+          return this.failureResult(
+            metadata,
+            FailureCategory.PARSE_ERROR,
+            'Failed to parse JSON response'
+          );
+        }
       } else if (contentType.includes('text/html')) {
         // HTML response — may need parsing or indicates error
         warnings.push('Received HTML response instead of JSON — may indicate endpoint change');
-        const html = await response.text();
         
         // Try to parse as JSON anyway (some endpoints return JSON with wrong content-type)
         try {
-          data = JSON.parse(html) as EastleighRawResponse;
+          data = JSON.parse(rawResponseText) as EastleighRawResponse;
         } catch {
           return this.failureResult(
             metadata,
@@ -385,9 +397,8 @@ export class EastleighAdapter implements CouncilAdapter {
           );
         }
       } else {
-        const text = await response.text();
         try {
-          data = JSON.parse(text) as EastleighRawResponse;
+          data = JSON.parse(rawResponseText) as EastleighRawResponse;
         } catch {
           return this.failureResult(
             metadata,
@@ -406,8 +417,24 @@ export class EastleighAdapter implements CouncilAdapter {
         );
       }
       
-      // Store evidence reference (implementation depends on storage layer)
-      const evidenceRef = uuidv4();
+      // Store raw evidence (HTML/JSON bytes) BEFORE any parsing
+      const evidenceType: 'html' | 'json' = contentType.includes('text/html') ? 'html' : 'json';
+      const evidenceMetadata = {
+        councilId: this.councilId,
+        attemptId: metadata.attemptId,
+        evidenceType: evidenceType,
+        capturedAt: new Date().toISOString(),
+        propertyIdentifier: uprn,
+        containsPii: false, // UPRN is not PII per UK GDPR guidance
+      };
+      
+      const evidenceResult = await storeEvidence(
+        this.councilId,
+        evidenceType,
+        rawResponseText, // Store RAW string, not parsed object
+        evidenceMetadata
+      );
+      const evidenceRef = evidenceResult.evidenceRef;
       
       metadata.completedAt = new Date().toISOString();
       metadata.durationMs = Date.now() - new Date(metadata.startedAt).getTime();

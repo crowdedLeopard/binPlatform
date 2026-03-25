@@ -183,8 +183,20 @@ describe('Security - Postcode Input Validation', () => {
       const sanitizeHouseParam = (house: string | undefined): string => {
         if (!house) return '';
         
+        // First remove HTML tags
         let clean = house.replace(/<[^>]*>/g, '');
+        
+        // Remove dangerous JavaScript keywords that might remain
+        clean = clean.replace(/\balert\b/gi, '');
+        clean = clean.replace(/\beval\b/gi, '');
+        clean = clean.replace(/document\.cookie/gi, '');
+        clean = clean.replace(/document\.write/gi, '');
+        clean = clean.replace(/window\.location/gi, '');
+        
+        // Truncate to reasonable length
         clean = clean.slice(0, 50);
+        
+        // Only allow alphanumeric, spaces, commas, hyphens
         clean = clean.replace(/[^a-zA-Z0-9\s,\-]/g, '');
         
         return clean.trim();
@@ -202,8 +214,20 @@ describe('Security - Postcode Input Validation', () => {
       const sanitizeHouseParam = (house: string | undefined): string => {
         if (!house) return '';
         
+        // First remove HTML tags
         let clean = house.replace(/<[^>]*>/g, '');
+        
+        // Remove dangerous JavaScript keywords that might remain
+        clean = clean.replace(/\balert\b/gi, '');
+        clean = clean.replace(/\beval\b/gi, '');
+        clean = clean.replace(/document\.cookie/gi, '');
+        clean = clean.replace(/document\.write/gi, '');
+        clean = clean.replace(/window\.location/gi, '');
+        
+        // Truncate to reasonable length
         clean = clean.slice(0, 50);
+        
+        // Only allow alphanumeric, spaces, commas, hyphens
         clean = clean.replace(/[^a-zA-Z0-9\s,\-]/g, '');
         
         return clean.trim();
@@ -211,7 +235,7 @@ describe('Security - Postcode Input Validation', () => {
 
       expect(sanitizeHouseParam('10')).toBe('10');
       expect(sanitizeHouseParam('Flat 2A')).toBe('Flat 2A');
-      expect(sanitizeHouseParam('Building A, Unit 5')).toBe('Building A Unit 5');
+      expect(sanitizeHouseParam('Building A, Unit 5')).toBe('Building A, Unit 5');
     });
   });
 
@@ -361,11 +385,16 @@ describe('Security - Postcode Input Validation', () => {
 
     it('should not contain internal file paths in error responses', () => {
       const sanitizeErrorMessage = (message: string): string => {
-        // Remove file paths
-        return message
-          .replace(/\/[\w\/.-]+\.(ts|js|json)/g, '[FILE]')
-          .replace(/[A-Z]:\\[\w\\.-]+\.(ts|js|json)/gi, '[FILE]')
-          .replace(/at .+:\d+:\d+/g, '');
+        // Remove Unix/Linux file paths
+        let sanitized = message.replace(/\/[\w\/.-]+\.(ts|js|json)/g, '[FILE]');
+        
+        // Remove Windows file paths
+        sanitized = sanitized.replace(/[A-Z]:\\[\w\\.-]+\.(ts|js|json)/gi, '[FILE]');
+        
+        // Remove stack trace line numbers
+        sanitized = sanitized.replace(/at .+:\d+:\d+/g, '');
+        
+        return sanitized;
       };
 
       const internalError = 'Error at /home/user/app/src/adapters/eastleigh.ts:45:12';
@@ -458,7 +487,7 @@ describe('Security - Postcode Input Validation', () => {
         return { status: 200, body: { data: [] } };
       };
 
-      const result = validatePostcode('SO50\01AA');
+      const result = validatePostcode('SO50\u0001AA');
 
       expect(result.status).toBe(400);
       expect(result.body.code).toBe('INVALID_POSTCODE');

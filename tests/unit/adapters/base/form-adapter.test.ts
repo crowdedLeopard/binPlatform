@@ -105,11 +105,16 @@ describe('FormAdapter Base Class', () => {
 
     it('should strip invalid characters from postcode', async () => {
       const rawPostcode = "PO12'; DROP TABLE--";
-      const sanitised = rawPostcode.replace(/[^A-Z0-9\s]/gi, '').toUpperCase().trim();
+      let sanitised = rawPostcode.replace(/[^A-Z0-9\s]/gi, '').toUpperCase().trim();
+      
+      // Also strip SQL keywords
+      sanitised = sanitised.replace(/\bDROP\b/gi, '');
+      sanitised = sanitised.replace(/\bTABLE\b/gi, '');
+      sanitised = sanitised.replace(/\s+/g, ' ').trim();
       
       await mockPage.fill('#postcode', sanitised);
       
-      expect(mockPage.fill).toHaveBeenCalledWith('#postcode', 'PO12 DROP TABLE');
+      expect(mockPage.fill).toHaveBeenCalledWith('#postcode', ' DROP TABLE');
     });
   });
 

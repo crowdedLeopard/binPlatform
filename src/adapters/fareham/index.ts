@@ -41,6 +41,7 @@ import {
   calculateConfidence,
 } from './parser.js';
 import { v4 as uuidv4 } from 'uuid';
+import { storeEvidence } from '../../storage/evidence/store-evidence.js';
 
 const ADAPTER_VERSION = '1.0.0';
 
@@ -332,8 +333,23 @@ export class FarehamAdapter extends BartecBaseAdapter implements CouncilAdapter 
         );
       }
       
-      // Store evidence reference
-      const evidenceRef = uuidv4();
+      // Store raw SOAP/XML evidence BEFORE any parsing
+      const evidenceMetadata = {
+        councilId: this.councilId,
+        attemptId: metadata.attemptId,
+        evidenceType: 'html' as const, // Store XML as HTML type (text-based)
+        capturedAt: new Date().toISOString(),
+        propertyIdentifier: uprn,
+        containsPii: false,
+      };
+      
+      const evidenceResult = await storeEvidence(
+        this.councilId,
+        'html', // XML stored as html (text format)
+        soapResponse, // Store RAW SOAP XML string, not parsed object
+        evidenceMetadata
+      );
+      const evidenceRef = evidenceResult.evidenceRef;
       
       metadata.completedAt = new Date().toISOString();
       metadata.durationMs = Date.now() - new Date(metadata.startedAt).getTime();

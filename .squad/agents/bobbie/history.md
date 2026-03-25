@@ -455,3 +455,92 @@ tests/
 
 **Artifacts:** docs/smoke-test-report-2026-03-25.md
 
+
+### 2026-03-25: Comprehensive Test Suite Execution & E2E API Testing
+
+**Test Execution Results:**
+
+1. **Unit Tests:** 247/265 passed (93.2%)
+   - **18 failures identified:**
+     - Input sanitization edge cases (3 failures in Rushmoor & FormAdapter)
+     - Confidence scoring for stale data (3 failures - decay too lenient)
+   - **Impact:** Medium priority - affects data quality scoring and input validation edge cases
+   - **Files affected:** 
+     - tests/unit/adapters/rushmoor.test.ts
+     - tests/unit/adapters/base/form-adapter.test.ts
+     - tests/unit/core/confidence.test.ts
+
+2. **Integration Tests:** 73/73 passed (100%) ✅
+   - All 13 Hampshire councils tested
+   - Kill switch behavior verified
+   - Schema drift detection working
+   - Concurrent request handling verified
+   - **Duration:** 878ms (excellent performance)
+
+3. **Security Tests:** 237/240 passed (98.8%)
+   - **3 test failures + 1 compile error:**
+     - Evidence stored as object instead of raw bytes (security risk)
+     - scanForSecrets() missing API key patterns (sk_live_*, hbp_live_*)
+     - Legacy octal escape in postcodes.test.ts (compile error)
+   - **Impact:** HIGH priority for production - secret leakage and evidence parsing risks
+
+4. **E2E Live API Tests:** 18/18 passed (100%) ✅
+   - **Created:** tests/e2e/api.test.ts
+   - **API Base:** https://ca-binplatform-api-staging.icyriver-42deda52.uksouth.azurecontainerapps.io
+   - **Coverage:**
+     - Core endpoints: /health, /ready, /v1/councils
+     - Kill switch verification (basingstoke-deane, eastleigh, portsmouth)
+     - Error handling (404 returns JSON, not HTML)
+     - Security headers (x-frame-options, x-content-type-options, strict-transport-security)
+     - Rate limiting headers (x-ratelimit-limit, x-ratelimit-remaining)
+   - **Response shape validation:**
+     - Councils endpoint returns: { councils: [...], count: 13, source_timestamp }
+     - Health endpoint includes: kill_switch_active, status, confidence_score, checked_at
+
+**Key Findings:**
+
+- **Overall Pass Rate:** 96.5% (575/596 tests)
+- **Production Readiness:** HIGH for infrastructure, but 4 critical security fixes needed
+- **API Response Format:** Discovered councils endpoint wraps array in object (not direct array)
+- **Security Posture:** Strong headers, proper error handling, but secret detection gaps exist
+
+**Gaps Identified:**
+
+1. **Test Coverage:**
+   - Missing: POST /v1/councils/{councilId}/lookup endpoint (core business logic untested)
+   - Missing: Authentication/authorization E2E tests
+   - Missing: Load/performance testing
+   - Missing: CORS header validation
+
+2. **Code Quality:**
+   - Input sanitization inconsistent across adapters
+   - Confidence scoring decay not aggressive enough for stale data (25h+ old)
+   - Secret detection patterns incomplete
+
+**Priority Recommendations:**
+
+- **P1 - Critical (Pre-Production):**
+  - Fix secret detection patterns (scanForSecrets missing sk_live_, hbp_live_, api_key= patterns)
+  - Fix evidence storage (store as raw string/buffer, not parsed object)
+  - Fix octal escape compile error in postcodes.test.ts:461
+
+- **P2 - High (Within Sprint):**
+  - Align input sanitization across all adapters
+  - Tune confidence scoring freshness decay for 24h+ old data
+  - Add E2E tests for lookup endpoint
+
+- **P3 - Medium (Next Sprint):**
+  - Add authentication E2E tests
+  - Add CORS validation tests
+  - Add load testing (k6 or similar)
+
+**Artifacts Created:**
+
+- tests/e2e/api.test.ts (standalone E2E test runner)
+- docs/test-report-2026-03-25.md (comprehensive test report)
+
+**Test Execution Time:** ~2 hours
+**Total Tests:** 596 (575 passed, 21 failed)
+**Test Duration:** ~6.3s for all automated tests
+
+**Sign-off:** ✅ E2E tests confirm staging API is functional. Security fixes required before production launch.

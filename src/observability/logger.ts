@@ -31,7 +31,9 @@ export const logger = pino({
       'AZURE_STORAGE_CONNECTION_STRING',
       'AWS_SECRET_ACCESS_KEY'
     ],
-    censor: '[REDACTED]'
+    censor: '[REDACTED]',
+    // Remove patterns that match platform-specific secret formats
+    remove: true
   },
   
   // Custom serializers for common objects

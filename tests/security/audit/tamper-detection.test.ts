@@ -313,7 +313,8 @@ describe('Security - Audit Tamper Detection', () => {
     it('should scan fixture logs for secrets', () => {
       const scanLogForSecrets = (logContent: string): string[] => {
         const secretPatterns = [
-          /hbp_(test|live)_[a-zA-Z0-9]{32}/g, // API keys
+          /hbp_(test|live)_[a-zA-Z0-9]{20,}/g,
+          /sk_live_[A-Za-z0-9]{20,}/g,
           /password\s*=\s*[^&\s]+/gi,
           /bearer\s+[a-z0-9]{20,}/gi,
           /sk_[a-z]+_[a-z0-9]{20,}/gi,

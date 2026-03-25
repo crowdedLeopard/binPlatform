@@ -387,6 +387,9 @@ describe('Security - Evidence Safety', () => {
     it('should scan evidence for potential secrets before storage', () => {
       const scanForSecrets = (content: string): string[] => {
         const secretPatterns = [
+          /sk_live_[A-Za-z0-9]{20,}/,
+          /hbp_live_[A-Za-z0-9]{20,}/,
+          /hbp_test_[A-Za-z0-9]{20,}/,
           /api[_-]?key[=:\s]+[a-z0-9]{20,}/i,
           /password[=:\s]+\S+/i,
           /bearer\s+[a-z0-9]{20,}/i,
