@@ -77,3 +77,165 @@
 - Store raw responses for debugging and audit trail
 - Version detection (HTML fingerprinting) to alert on upstream changes
 - Automated smoke tests for early breakage detection
+
+---
+
+### 2026-03-25: Phase 2 — First Two Production Adapters Implemented
+
+**Delivered:** Production-ready adapters for Eastleigh and Rushmoor councils.
+
+**Eastleigh Adapter (API-based):**
+- **Method:** Oracle APEX machine-readable endpoint (`my.eastleigh.gov.uk/apex/EBC_Waste_Calendar`)
+- **Input:** UPRN (Unique Property Reference Number)
+- **Risk Level:** MEDIUM (bot protection present, rate limiting required)
+- **Key Patterns:**
+  - HTTP GET with honest User-Agent header
+  - UPRN validation (numeric, 1-12 digits)
+  - Multi-format date parsing (ISO, DD/MM/YYYY, day names)
+  - Service type mapping (Refuse→GENERAL_WASTE, Recycling→RECYCLING, etc.)
+  - Timeout enforcement (15s connect, 30s total)
+  - Error categorization (403→BOT_DETECTION, 429→RATE_LIMITED, 404→NOT_FOUND)
+  - Evidence capture (JSON responses stored to blob storage)
+  - Kill switch support (`ADAPTER_KILL_SWITCH_EASTLEIGH`)
+  - Confidence scoring based on data completeness
+- **Challenges:** 
+  - Bot protection triggers on automated access (requires rate limiting)
+  - UPRN dependency (requires external resolution service)
+  - HTML fallback parsing if JSON not returned
+- **Lessons:** API-based adapters are fast (1-2s) but fragile due to bot protection
+
+**Rushmoor Adapter (Browser Automation):**
+- **Method:** Playwright browser automation with HTML form submission
+- **Input:** Postcode (with optional address disambiguation)
+- **Risk Level:** MEDIUM (browser automation overhead, page structure brittleness)
+- **Key Patterns:**
+  - Playwright with security hardening (domain allowlist, timeout enforcement)
+  - Network isolation (rushmoor.gov.uk only, cloud metadata blocked)
+  - Screenshot capture on failure (stored as evidence)
+  - Network request logging (HAR capture for debugging)
+  - Multi-selector fallback (select dropdown, list items, table rows)
+  - Schema drift detection (selector presence checks)
+  - Postcode validation (UK format with normalization)
+  - Browser instance cleanup (prevent resource leaks)
+- **Challenges:**
+  - Resource intensive (200-400MB memory, 8-15s execution time)
+  - Page structure changes break selectors
+  - Cookie consent banners (automated dismissal needed)
+- **Lessons:** Browser automation works but is 5-10x slower than API; aggressive caching essential
+
+**Shared Infrastructure Built:**
+
+1. **Browser Adapter Base (`src/adapters/base/browser-adapter.ts`)**
+   - Reusable Playwright wrapper for all browser-based adapters
+   - Security controls: domain allowlist, navigation blocking, sandbox config
+   - Error handling: timeout, network error, schema drift classification
+   - Evidence capture: screenshots, HAR, network logs
+   - Pattern: `executeBrowserTask()` wraps automation with safety nets
+
+2. **Evidence Storage Layer (`src/storage/evidence/store-evidence.ts`)**
+   - Stores raw responses (JSON, HTML, PDF, screenshots) for audit
+   - SHA-256 content hashing for integrity
+   - 90-day retention (automated deletion via blob lifecycle policy)
+   - Environment-aware: Azure Blob (production), filesystem (dev), memory (test)
+   - PII awareness: evidence marked with `containsPii` flag
+   - Storage path: `{councilId}/{date}/{uuid}.{ext}`
+
+3. **Adapter Registry (`src/adapters/registry.ts`)**
+   - Centralized registration with kill switch support
+   - Global kill switch: `ADAPTER_KILL_SWITCH_GLOBAL`
+   - Per-adapter kill switch: `ADAPTER_KILL_SWITCH_EASTLEIGH`, `ADAPTER_KILL_SWITCH_RUSHMOOR`
+   - AdapterDisabledError exception when adapter unavailable
+   - Council discovery: `getSupportedCouncils()`, `isCouncilSupported()`
+
+**Adapter Interface Patterns Established:**
+
+- **UPRN Validation:** Numeric, 1-12 digits, range 1-999999999999
+- **Postcode Validation:** UK format (AA9A 9AA), normalized with single space
+- **Date Parsing:** Multi-format support (ISO, DD/MM/YYYY, day names with ordinals)
+- **Service Type Mapping:** Fuzzy matching (case-insensitive, substring matching)
+- **Confidence Scoring:** 0-1 scale based on data completeness (UPRN, address, collections count)
+- **Error Categories:** 13 categories (NETWORK_ERROR, BOT_DETECTION, RATE_LIMITED, PARSE_ERROR, etc.)
+- **Metadata Capture:** attemptId, timestamps, duration, HTTP count, bytes, browser usage, risk level
+- **Evidence Reference:** UUID-based reference, content hash, storage path, expiry date
+
+**Discovery API Shapes:**
+
+**Eastleigh Response Structure:**
+```json
+{
+  "uprn": "100060321174",
+  "address": "1 Example Road",
+  "postcode": "SO50 4XX",
+  "collections": [
+    {
+      "service": "Refuse",
+      "collectionDate": "2026-04-01",
+      "frequency": "Fortnightly",
+      "containerType": "240L wheeled bin",
+      "containerColour": "Black"
+    }
+  ]
+}
+```
+
+**Rushmoor HTML Patterns:**
+- Postcode input: `input[name*="postcode" i]`
+- Submit button: `button[type="submit"]`
+- Address select: `select[name*="address" i]` or list items `ul li a`
+- Collection data: Table rows, div containers, or list items with date/service extraction
+
+**Security Hardening Applied:**
+
+1. **Input Validation:**
+   - UPRN: Numeric only, range check, sanitization
+   - Postcode: UK format regex, normalization
+   - All string inputs: Trim, length limit (500 chars), HTML tag removal
+
+2. **Network Controls:**
+   - Timeout enforcement (connect 15s, total 30s)
+   - Abort controller for timeout handling
+   - Honest User-Agent (not browser impersonation)
+   - Domain allowlisting (browser automation)
+
+3. **Error Handling:**
+   - Explicit categorization (no generic errors)
+   - Security warnings separate from functional warnings
+   - Bot detection logging as security event
+   - No sensitive data in error messages
+
+4. **Evidence & Logging:**
+   - No raw response body in logs (metadata only)
+   - Content-length logged, not content
+   - PII flag set on all evidence
+   - Automatic redaction in future logging layer
+
+**Performance Benchmarks:**
+- Eastleigh (API): 1-2s per request
+- Rushmoor (Browser): 8-15s per request
+- Cache hit ratio target: >80% (7-day TTL on schedules)
+
+**Rate Limiting Strategy:**
+- Eastleigh: 30 requests/minute (conservative)
+- Rushmoor: 10 requests/minute (browser overhead)
+- Backoff on 403/429: 10s → 20s → 40s → max 5min
+- Circuit breaker: 5 consecutive failures → 1 hour pause
+
+**Testing Approach:**
+- Unit tests: Validation, parsing, date handling, service mapping
+- Integration tests: Real network calls with test data
+- Health checks: Automated daily smoke tests
+- Schema drift: Selector presence validation
+
+**Monitoring Metrics:**
+- Success rate (target: >95% for Eastleigh, >90% for Rushmoor)
+- Response time (P50, P95, P99)
+- Cache hit rate
+- Error rate by category
+- Bot detection frequency
+
+**Next Steps for Phase 3:**
+- Apply Rushmoor browser pattern to 8 other form-based councils (Hart, Gosport, Havant, Test Valley, Portsmouth, Winchester, Basingstoke, New Forest)
+- Build UPRN resolution service for Eastleigh dependency
+- Implement Fareham Bartec adapter (reusable SOAP pattern)
+- Add PDF parsing for East Hampshire
+

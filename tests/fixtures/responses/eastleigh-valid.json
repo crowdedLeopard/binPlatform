@@ -1,0 +1,68 @@
+{
+  "uprn": "100060321174",
+  "address": "1 High Street, Eastleigh, SO50 5LA",
+  "collections": [
+    {
+      "id": "coll_123456",
+      "serviceType": "Refuse Collection",
+      "serviceName": "Black Bin - General Waste",
+      "nextCollectionDate": "2026-03-28",
+      "frequency": "Fortnightly",
+      "containerType": "240L wheeled bin",
+      "containerColour": "Black",
+      "notes": "Present bin by 7am on collection day"
+    },
+    {
+      "id": "coll_123457",
+      "serviceType": "Recycling Collection",
+      "serviceName": "Green Bin - Recycling",
+      "nextCollectionDate": "2026-04-04",
+      "frequency": "Fortnightly",
+      "containerType": "240L wheeled bin",
+      "containerColour": "Green",
+      "notes": "Recyclables: paper, cardboard, plastic bottles, metal cans"
+    },
+    {
+      "id": "coll_123458",
+      "serviceType": "Food Waste Collection",
+      "serviceName": "Food Caddy",
+      "nextCollectionDate": "2026-03-28",
+      "frequency": "Weekly",
+      "containerType": "23L caddy",
+      "containerColour": "Brown",
+      "notes": "Use compostable liners"
+    },
+    {
+      "id": "coll_123459",
+      "serviceType": "Garden Waste Collection",
+      "serviceName": "Brown Bin - Garden Waste (Subscription)",
+      "nextCollectionDate": "2026-04-04",
+      "frequency": "Fortnightly (March-November)",
+      "containerType": "240L wheeled bin",
+      "containerColour": "Brown",
+      "notes": "Paid subscription required",
+      "subscriptionActive": true
+    }
+  ],
+  "schedule": [
+    {
+      "date": "2026-03-28",
+      "services": ["Refuse Collection", "Food Waste Collection"]
+    },
+    {
+      "date": "2026-04-04",
+      "services": ["Recycling Collection", "Garden Waste Collection"]
+    },
+    {
+      "date": "2026-04-11",
+      "services": ["Refuse Collection", "Food Waste Collection"]
+    },
+    {
+      "date": "2026-04-18",
+      "services": ["Recycling Collection", "Garden Waste Collection"]
+    }
+  ],
+  "lastUpdated": "2026-03-25T10:30:00Z",
+  "source": "Oracle APEX",
+  "apiVersion": "1.0"
+}

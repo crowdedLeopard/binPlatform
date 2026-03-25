@@ -209,6 +209,14 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       
+      - name: Cache Trivy DB
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/trivy
+          key: trivy-db-${{ github.run_id }}
+          restore-keys: |
+            trivy-db-
+      
       - name: Build API image
         uses: docker/build-push-action@v5
         with:
@@ -219,28 +227,208 @@ jobs:
           tags: hampshire-bin-api:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          build-args: |
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+            GIT_COMMIT=${{ github.sha }}
       
-      - name: Run Trivy vulnerability scanner
+      - name: Build Worker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: deploy/Dockerfile.worker
+          push: false
+          load: true
+          tags: hampshire-bin-worker:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+            GIT_COMMIT=${{ github.sha }}
+      
+      - name: Run Trivy on API image (SARIF)
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: hampshire-bin-api:${{ github.sha }}
           format: 'sarif'
-          output: 'trivy-results.sarif'
+          output: 'trivy-api-results.sarif'
           severity: 'CRITICAL,HIGH'
       
-      - name: Upload Trivy results to GitHub Security
-        uses: github/codeql-action/upload-sarif@v2
+      - name: Run Trivy on Worker image (SARIF)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: hampshire-bin-worker:${{ github.sha }}
+          format: 'sarif'
+          output: 'trivy-worker-results.sarif'
+          severity: 'CRITICAL,HIGH'
+      
+      - name: Upload API Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:
-          sarif_file: 'trivy-results.sarif'
+          sarif_file: 'trivy-api-results.sarif'
+          category: 'container-api'
       
-      - name: Fail on critical vulnerabilities
+      - name: Upload Worker Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-worker-results.sarif'
+          category: 'container-worker'
+      
+      - name: Fail on CRITICAL vulnerabilities in API
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: hampshire-bin-api:${{ github.sha }}
           format: 'table'
           exit-code: '1'
           severity: 'CRITICAL'
+      
+      - name: Fail on CRITICAL vulnerabilities in Worker
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: hampshire-bin-worker:${{ github.sha }}
+          format: 'table'
+          exit-code: '1'
+          severity: 'CRITICAL'
+      
+      - name: Check HIGH vulnerabilities in API (warn only)
+        uses: aquasecurity/trivy-action@master
+        continue-on-error: true
+        with:
+          image-ref: hampshire-bin-api:${{ github.sha }}
+          format: 'table'
+          exit-code: '0'
+          severity: 'HIGH'
+      
+      - name: Check HIGH vulnerabilities in Worker (warn only)
+        uses: aquasecurity/trivy-action@master
+        continue-on-error: true
+        with:
+          image-ref: hampshire-bin-worker:${{ github.sha }}
+          format: 'table'
+          exit-code: '0'
+          severity: 'HIGH'
+
+  adapter-kill-switch-audit:
+    name: Kill Switch Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      
+      - name: Verify kill switches
+        run: |
+          echo "Checking kill switch configuration..."
+          node scripts/ci/verify-kill-switches.js
+      
+      - name: Verify Dockerfile has no hardcoded kill switches
+        run: |
+          if grep -E 'ADAPTER_KILL_SWITCH_[A-Z_]+=(true|false)' deploy/Dockerfile deploy/Dockerfile.worker; then
+            echo "ERROR: Dockerfile contains hardcoded kill switch values"
+            exit 1
+          fi
+          echo "✅ No hardcoded kill switches in Dockerfiles"
+      
+      - name: Verify adapters read from environment
+        run: |
+          if ! grep -q 'process\.env\.ADAPTER_KILL_SWITCH' src/adapters/registry.ts; then
+            echo "ERROR: registry.ts does not read kill switches from environment"
+            exit 1
+          fi
+          echo "✅ Adapters read kill switches from environment"
+
+  secrets-baseline:
+    name: Secrets Baseline Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install detect-secrets
+        run: pip install detect-secrets
+      
+      - name: Create baseline if missing
+        run: |
+          if [ ! -f .secrets.baseline ]; then
+            echo "Creating initial secrets baseline..."
+            detect-secrets scan --baseline .secrets.baseline
+            echo "⚠️  No baseline found - created new baseline"
+            echo "Review .secrets.baseline and commit if this is the first run"
+            exit 0
+          fi
+      
+      - name: Scan for new secrets
+        run: |
+          detect-secrets scan --baseline .secrets.baseline
+          if [ $? -ne 0 ]; then
+            echo "❌ New secrets detected! Run 'detect-secrets scan --baseline .secrets.baseline' locally to audit"
+            exit 1
+          fi
+          echo "✅ No new secrets detected"
+
+  dependency-check:
+    name: OWASP Dependency Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: npm audit
+        run: npm audit --audit-level=high
+      
+      - name: OWASP Dependency Check
+        uses: dependency-check/Dependency-Check_Action@main
+        with:
+          project: 'hampshire-bin-platform'
+          path: '.'
+          format: 'SARIF'
+          args: >
+            --failOnCVSS 7
+            --enableRetired
+      
+      - name: Upload SARIF results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: reports/dependency-check-report.sarif
+
+  iac-scan:
+    name: Infrastructure as Code Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Run tfsec
+        uses: aquasecurity/tfsec-action@v1.0.3
+        with:
+          working_directory: infra/terraform
+          soft_fail: false
+          format: sarif
+          additional_args: --minimum-severity HIGH
+      
+      - name: Upload tfsec SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: results.sarif
 
   build:
     name: Build Application

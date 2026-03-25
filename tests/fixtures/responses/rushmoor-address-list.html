@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Bin Collection Day Finder - Address Selection</title>
+</head>
+<body>
+    <div class="container">
+        <h1>Select Your Address</h1>
+        <p>We found multiple addresses for postcode <strong>GU14 7JF</strong>:</p>
+        
+        <form method="POST" action="/bin-collection/collection-schedule">
+            <input type="hidden" name="_csrf" value="abc123xyz789">
+            
+            <div class="address-list">
+                <label>
+                    <input type="radio" name="addressId" value="addr_1001" required>
+                    1 Fleet Road, Aldershot, GU14 7JF
+                </label>
+                
+                <label>
+                    <input type="radio" name="addressId" value="addr_1002" required>
+                    2 Fleet Road, Aldershot, GU14 7JF
+                </label>
+                
+                <label>
+                    <input type="radio" name="addressId" value="addr_1003" required>
+                    3 Fleet Road, Aldershot, GU14 7JF
+                </label>
+                
+                <label>
+                    <input type="radio" name="addressId" value="addr_1004" required>
+                    Flat 1, 4 Fleet Road, Aldershot, GU14 7JF
+                </label>
+                
+                <label>
+                    <input type="radio" name="addressId" value="addr_1005" required>
+                    Flat 2, 4 Fleet Road, Aldershot, GU14 7JF
+                </label>
+            </div>
+            
+            <button type="submit">View Collection Schedule</button>
+        </form>
+    </div>
+</body>
+</html>

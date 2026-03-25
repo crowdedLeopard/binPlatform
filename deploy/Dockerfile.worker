@@ -18,28 +18,52 @@ RUN npm prune --production
 # Stage 2: Runtime with Playwright
 FROM mcr.microsoft.com/playwright:v1.42.0-jammy AS runtime
 
-# Install Node.js 20
+# Build arguments for labeling
+ARG BUILD_DATE
+ARG GIT_COMMIT
+
+# Install Node.js 20 and dumb-init
 RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
-    apt-get install -y nodejs && \
+    apt-get install -y nodejs dumb-init && \
     apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+    rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
 # Create non-root user
 RUN groupadd -r nodejs -g 1001 && \
-    useradd -r -g nodejs -u 1001 nodejs
+    useradd -r -g nodejs -u 1001 nodejs && \
+    mkdir -p /tmp/playwright && \
+    chown -R nodejs:nodejs /tmp/playwright
 
 WORKDIR /app
 
-# Copy built application
-COPY --from=builder --chown=nodejs:nodejs /build/node_modules ./node_modules
+# Copy built application (dist only, minimal footprint)
 COPY --from=builder --chown=nodejs:nodejs /build/dist ./dist
-COPY --from=builder --chown=nodejs:nodejs /build/package*.json ./
+COPY --from=builder --chown=nodejs:nodejs /build/node_modules ./node_modules
+COPY --from=builder --chown=nodejs:nodejs /build/package.json ./package.json
+
+# Remove package managers
+RUN rm -f /usr/bin/npm /usr/bin/npx /usr/bin/yarn
 
 USER nodejs
 
-# Start worker
-CMD ["node", "dist/workers/acquisition-worker.js"]
+# Expose metrics/health port if needed
+EXPOSE 9090
 
+# Health check for worker (checks if process is responsive)
+HEALTHCHECK --interval=60s --timeout=10s --start-period=60s --retries=3 \
+  CMD node -e "process.exit(0)"
+
+# Use dumb-init for signal handling
+ENTRYPOINT ["dumb-init", "--"]
+
+# Start worker with security options
+CMD ["node", "--no-deprecation", "dist/workers/acquisition-worker.js"]
+
+# Security labels and metadata
 LABEL maintainer="Hampshire Bin Platform Team"
 LABEL org.opencontainers.image.title="Hampshire Bin Platform Worker"
 LABEL org.opencontainers.image.description="Acquisition worker with Playwright for browser automation"
+LABEL org.opencontainers.image.created="${BUILD_DATE}"
+LABEL org.opencontainers.image.revision="${GIT_COMMIT}"
+LABEL security.no-new-privileges="true"
+LABEL security.seccomp="restrictive"

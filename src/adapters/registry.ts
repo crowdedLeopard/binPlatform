@@ -1,56 +1,135 @@
 /**
  * Adapter Registry
- * Maps council IDs to adapter instances
- * Provides adapter lookup and lifecycle management
+ * 
+ * Centralised registry for all council adapters.
+ * Manages adapter lifecycle, kill switches, and discovery.
+ * 
+ * @module adapters/registry
  */
 
-import { CouncilAdapter } from './base/interface.js';
-import { BasingstokeAdapter } from './basingstoke/index.js';
-import { EastHampshireAdapter } from './east-hampshire/index.js';
-// TODO: Import other adapters
+import type { CouncilAdapter } from './base/adapter.interface.js';
+import { EastleighAdapter } from './eastleigh/index.js';
+import { RushmoorAdapter } from './rushmoor/index.js';
 
-const adapters = new Map<string, CouncilAdapter>();
+export class AdapterDisabledError extends Error {
+  constructor(councilId: string) {
+    super(`Adapter '${councilId}' is disabled via kill switch`);
+    this.name = 'AdapterDisabledError';
+  }
+}
 
 /**
- * Initialize all adapters
+ * Adapter registry with kill switch support.
+ */
+class AdapterRegistry {
+  private adapters = new Map<string, CouncilAdapter>();
+  
+  /**
+   * Register an adapter.
+   */
+  register(adapter: CouncilAdapter): void {
+    // Check for global kill switch
+    if (process.env.ADAPTER_KILL_SWITCH_GLOBAL === 'true') {
+      console.warn(`[REGISTRY] Global kill switch enabled — adapter '${adapter.councilId}' not registered`);
+      return;
+    }
+    
+    // Check for adapter-specific kill switch
+    const killSwitchVar = `ADAPTER_KILL_SWITCH_${adapter.councilId.toUpperCase().replace(/-/g, '_')}`;
+    if (process.env[killSwitchVar] === 'true') {
+      console.warn(`[REGISTRY] Kill switch enabled for '${adapter.councilId}' — not registered`);
+      return;
+    }
+    
+    this.adapters.set(adapter.councilId, adapter);
+    console.log(`[REGISTRY] Registered adapter: ${adapter.councilId}`);
+  }
+  
+  /**
+   * Get adapter by council ID.
+   * Throws AdapterDisabledError if adapter is disabled or not found.
+   */
+  get(councilId: string): CouncilAdapter {
+    const adapter = this.adapters.get(councilId);
+    
+    if (!adapter) {
+      throw new AdapterDisabledError(councilId);
+    }
+    
+    return adapter;
+  }
+  
+  /**
+   * Get all registered adapters.
+   */
+  getAll(): CouncilAdapter[] {
+    return Array.from(this.adapters.values());
+  }
+  
+  /**
+   * Check if adapter is registered.
+   */
+  has(councilId: string): boolean {
+    return this.adapters.has(councilId);
+  }
+  
+  /**
+   * Get list of registered council IDs.
+   */
+  listCouncils(): string[] {
+    return Array.from(this.adapters.keys());
+  }
+}
+
+// Singleton registry instance
+export const adapterRegistry = new AdapterRegistry();
+
+/**
+ * Initialize all adapters.
+ * Should be called at application startup.
  */
 export function initializeAdapters(): void {
-  // Register all adapters
-  registerAdapter(new BasingstokeAdapter());
-  registerAdapter(new EastHampshireAdapter());
-  // TODO: Register remaining adapters
+  console.log('[REGISTRY] Initializing adapters...');
+  
+  // Register Phase 1 adapters
+  adapterRegistry.register(new EastleighAdapter());
+  adapterRegistry.register(new RushmoorAdapter());
+  
+  // TODO: Register Phase 2+ adapters as implemented
+  // adapterRegistry.register(new FarehamAdapter());
+  // adapterRegistry.register(new EastHampshireAdapter());
+  // ... etc
+  
+  const registeredCount = adapterRegistry.getAll().length;
+  console.log(`[REGISTRY] Initialized ${registeredCount} adapter(s)`);
 }
 
 /**
- * Register an adapter
+ * Get adapter by council ID.
+ * Convenience function for common usage.
  */
-export function registerAdapter(adapter: CouncilAdapter): void {
-  adapters.set(adapter.metadata.councilId, adapter);
+export function getAdapter(councilId: string): CouncilAdapter {
+  return adapterRegistry.get(councilId);
 }
 
 /**
- * Get adapter by council ID
- */
-export function getAdapter(councilId: string): CouncilAdapter | undefined {
-  return adapters.get(councilId);
-}
-
-/**
- * Get all registered adapters
+ * Get all registered adapters.
  */
 export function getAllAdapters(): CouncilAdapter[] {
-  return Array.from(adapters.values());
+  return adapterRegistry.getAll();
 }
 
 /**
- * Cleanup all adapters (on shutdown)
+ * Check if council is supported.
  */
-export async function cleanupAdapters(): Promise<void> {
-  const cleanupPromises = Array.from(adapters.values()).map(adapter =>
-    adapter.cleanup().catch(err => {
-      console.error(`Failed to cleanup adapter ${adapter.metadata.councilId}:`, err);
-    })
-  );
-  
-  await Promise.all(cleanupPromises);
+export function isCouncilSupported(councilId: string): boolean {
+  return adapterRegistry.has(councilId);
 }
+
+/**
+ * Get list of supported councils.
+ */
+export function getSupportedCouncils(): string[] {
+  return adapterRegistry.listCouncils();
+}
+

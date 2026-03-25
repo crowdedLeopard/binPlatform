@@ -55,3 +55,105 @@
 - `docs/threat-model/security-controls.md` — 150+ controls checklist with owners and phases
 - `docs/threat-model/incident-triggers.md` — 15 incident types with response procedures
 - `docs/threat-model/kill-switch-strategy.md` — Per-adapter and global kill switch design
+
+---
+
+### 2026-03-25: Phase 2 Audit Logging & Security Event Infrastructure Complete
+
+**Implementation Summary:**
+
+Delivered complete Phase 2 security observability infrastructure for production readiness:
+
+1. **Audit Logging System** (`src/observability/audit.ts`)
+   - Structured audit trail for all privileged and security-relevant actions
+   - 18 event types covering auth, adapters, abuse, admin, and security
+   - IP anonymisation (IPv4 last octet zeroed, IPv6 last 80 bits zeroed)
+   - PII-safe: never logs API keys, connection strings, full addresses
+   - HMAC signing for tamper evidence (sequential event numbers)
+   - Async logging pattern (never blocks request path)
+   - SIEM transport injection point (ready for Azure Sentinel/Splunk integration)
+
+2. **Security Event Storage** (`src/storage/db/security-events.ts`)
+   - Write-through PostgreSQL persistence for queryable security events
+   - Async writes (best-effort, never blocks)
+   - Query API with flexible filtering (severity, type, council, date range)
+   - Helper queries: critical events, per-council events, IP abuse lookup
+   - Migration: `003_security_events.sql` with optimised indexes
+
+3. **Injection Detection Middleware** (`src/api/middleware/injection-detection.ts`)
+   - Detects SQL injection, XSS, path traversal, null bytes, CRLF injection
+   - Pattern-based detection (configurable for production)
+   - Blocks and logs as SECURITY_INJECTION_ATTEMPT (critical severity)
+   - Returns generic 400 error (does not reveal detection logic)
+   - Applied to all API endpoints before route handlers
+
+4. **Enumeration Detection Middleware** (`src/api/middleware/enumeration-detection.ts`)
+   - Sliding window tracking (15-minute window, 1-minute buckets)
+   - Redis-backed distributed state
+   - Soft block at 50 unique postcodes (artificial delay, 1-3s, degrades bot performance)
+   - Hard block at 100 unique postcodes (15-minute ban)
+   - Per-IP tracking with anonymised IP keys
+   - Never reveals detection thresholds to attacker
+
+5. **Admin Security Endpoints** (`src/api/routes/admin/security-events.ts`)
+   - `GET /v1/admin/security/events` — Paginated query with filters
+   - `GET /v1/admin/security/events/critical` — Critical events in last N hours
+   - `GET /v1/admin/security/events/council/:councilId` — Per-council events
+   - `GET /v1/admin/security/events/ip/:ip` — Abuse events for IP
+   - `GET /v1/admin/security/stats` — Aggregated statistics
+   - Ready for Holden to integrate into admin routes
+
+6. **Adapter Security Review** (`docs/threat-model/adapter-security-review.md`)
+   - Comprehensive security analysis of `CouncilAdapter` interface
+   - **5 critical gaps identified:**
+     - No output sanitisation enforcement → XSS risk
+     - State leakage risk → No architectural isolation guarantee
+     - Evidence path injection vulnerability → Storage path manipulation
+     - Incomplete security profile → Missing runtime enforcement signals
+     - No input validation contract → Trust boundary unclear
+   - **Proposed ADR for interface enhancements** (for Holden's review)
+   - **Security patterns all adapters must follow** (mandatory checklist)
+   - Code review checklist for adapter PRs
+
+**Security Patterns Established:**
+
+- **IP anonymisation everywhere:** Last octet/80 bits zeroed before any storage/logging
+- **Never log secrets:** API keys hashed, no connection strings, no full addresses
+- **Tamper evidence:** HMAC signatures + sequential event numbers
+- **Async writes only:** Security logging never blocks request path
+- **Generic error responses:** Injection attempts get 400 without details (hide detection)
+- **Soft blocking first:** Degradation before hard block (harder to detect)
+- **Attack surface reduction:** Evidence paths controlled by platform, not adapters
+
+**Integration Points for Holden:**
+
+1. **Middleware registration:**
+   ```typescript
+   app.use('*', injectionDetection);
+   app.use('/v1/postcodes/*', enumerationDetection);
+   ```
+
+2. **Admin routes:**
+   ```typescript
+   import { registerSecurityEventRoutes } from './routes/admin/security-events';
+   registerSecurityEventRoutes(adminApp);
+   ```
+
+3. **Database client injection:**
+   ```typescript
+   import { setDatabaseClient } from './storage/db/security-events';
+   setDatabaseClient(dbPool);
+   ```
+
+4. **Redis client injection:**
+   ```typescript
+   import { setRedisClient } from './api/middleware/enumeration-detection';
+   setRedisClient(redis);
+   ```
+
+**Next Phase Actions:**
+
+- **Holden:** Integrate middleware, admin routes, propose response to adapter interface ADR
+- **Naomi:** Review adapter security patterns, apply to existing adapters
+- **Drummer:** Run migration `003_security_events.sql`, configure SIEM transport
+- **All:** No secrets in logs (audit logs are append-only, cannot be edited)
