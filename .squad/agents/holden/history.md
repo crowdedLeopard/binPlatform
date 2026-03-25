@@ -12,7 +12,7 @@
 
 **Key Decisions:**
 - **TypeScript over Python** (ADR-001): Chosen for type safety at contract boundaries, native Playwright support, and single-language stack across API/workers/adapters.
-- **Hono over Fastify/Express** (ADR-002): Modern TypeScript-first framework with built-in security headers, excellent Zod integration, and smaller attack surface.
+- **Hono over Fastify/Express** (ADR-002): Modern TypeScript-first framework with built-in security headers, excellent Zod integration, and smaller attack surface. (Note: Drummer's bootstrap used Fastify; now updated to Hono per this decision.)
 - **PostgreSQL + Redis + Blob Storage** (ADR-003): Three-tier architecture separating relational data, ephemeral cache/queues, and immutable evidence storage.
 - **Worker Queue with Container Sandbox** (ADR-004): BullMQ for adapter orchestration with process isolation; containerised browser automation for high-risk scrapers.
 - **Layered UPRN Resolution** (ADR-005): UPRN as canonical when available, with fallback to council local IDs and normalised addresses.
@@ -35,3 +35,6 @@
 - Database tables partitioned by time for collection_events, acquisition_attempts, security_events
 - API key auth for public API, JWT for admin API
 - Trust boundary documentation for each crossing
+
+**Framework Alternative Note:**
+Drummer's bootstrap defaulted to Fastify, but this decision moves to Hono as the primary framework. Hono provides better TypeScript-first design, built-in security headers via `secureHeaders()` middleware, and native Zod integration for request validation. Smaller attack surface compared to Express makes it preferable for a security-hardened platform.
