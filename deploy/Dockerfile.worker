@@ -17,7 +17,7 @@ RUN npm prune --production
 
 # Stage 2: Runtime with Playwright
 # Pin digest for reproducibility — update quarterly
-FROM mcr.microsoft.com/playwright:v1.42.0-jammy@sha256:6513f5f6f85ba7bb7c8b0b8c0b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b AS runtime
+FROM mcr.microsoft.com/playwright:v1.58.2-jammy@sha256:4698a73749c5848d3f5fcd42a2174d172fcad2b2283e087843b115424303a565 AS runtime
 
 # Build arguments for labeling
 ARG BUILD_DATE
